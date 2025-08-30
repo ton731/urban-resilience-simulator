@@ -1,0 +1,20 @@
+fastapi
+uvicorn
+pydantic_settings
+python-multipart
+
+# For geometric operations and graph data structures
+networkx
+shapely
+geopandas
+
+# For numerical operations
+numpy
+scipy
+
+# For random map generation
+noise
+
+# For configuration and data handling
+pyyaml
+python-dotenv

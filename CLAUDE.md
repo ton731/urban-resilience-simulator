@@ -22,13 +22,43 @@ The project follows a complete frontend-backend separation architecture:
 
 ## Current State
 
-**Note**: This repository is currently in the initial documentation phase. The codebase structure outlined in the technical documentation has not yet been implemented.
+### ✅ Implemented Features
+
+**WS-1.1: Procedural Map Generation** - **COMPLETED**
+- Full backend implementation of procedural 2D map generation
+- Random but logical road networks with main roads and secondary roads
+- Graph data structure using NetworkX for efficient pathfinding
+- Configurable generation parameters
+- FastAPI endpoint: `POST /api/v1/world/generate`
 
 ### Existing Files
 - `README.md` - Basic project identifier
 - `docs/prd.md` - Complete Product Requirements Document (in Traditional Chinese)
 - `docs/tech.md` - Technical architecture and project structure specification (in Traditional Chinese)
+- `backend/` - FastAPI backend with WS-1.1 implementation
 - `.gitignore` - Standard Python gitignore with additional tools (Ruff, Cursor, Marimo, etc.)
+
+## Development Commands
+
+### Backend Development
+
+```bash
+# Install dependencies
+cd backend && pip install -r requirements.txt
+
+# Start development server with hot reload
+cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Test WS-1.1 map generation directly
+cd backend && python demo_ws11.py
+
+# Run tests (when implemented)
+cd backend && pytest tests/
+```
+
+### API Documentation
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
 ## Development Approach
 
@@ -55,3 +85,5 @@ When implementing this project, follow the technical architecture specified in `
 ## Language Context
 
 The project documentation is written in Traditional Chinese, reflecting the Taiwan context for urban resilience planning. The target users are primarily government disaster response units, urban planning departments, and infrastructure management agencies in Chinese-speaking regions.
+- Please write a test script to demo the input/output of the new-added feature if necessary after your implementation.
+- Don't write READMEs after implementation.

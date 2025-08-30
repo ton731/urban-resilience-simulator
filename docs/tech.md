@@ -9,12 +9,11 @@ urban-resilience-simulator/
 ├── backend/                  # Python FastAPI 後端專案 (維持不變)
 │   ├── app/
 │   │   ├── api/              # API 路由 (Endpoints)
-│   │   │   ├── v1/           # API 版本 v1
-│   │   │   │   ├── endpoints/
-│   │   │   │   │   ├── world.py        # 處理世界生成的 API (POST /api/v1/world)
-│   │   │   │   │   ├── simulation.py   # 處理模擬與分析的 API (POST /api/v1/simulation)
-│   │   │   │   │   └── impact.py       # 處理衝擊分析的 API (POST /api/v1/impact)
-│   │   │   │   └── __init__.py
+│   │   │   ├── endpoints/
+│   │   │   │   ├── world.py        # 處理世界生成的 API (POST /api/v1/world)
+│   │   │   │   ├── simulation.py   # 處理模擬與分析的 API (POST /api/v1/simulation)
+│   │   │   │   └── impact.py       # 處理衝擊分析的 API (POST /api/v1/impact)
+│   │   │   └── __init__.py
 │   │   ├── core/             # 核心商業邏輯 (PRD中的模組實作)
 │   │   │   ├── config.py         # 應用程式設定
 │   │   │   ├── world_synthesizer/  # 模組一：世界合成器
