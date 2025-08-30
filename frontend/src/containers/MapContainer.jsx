@@ -53,7 +53,15 @@ const MapContainer = () => {
   useEffect(() => {
     if (mapInstanceRef.current) {
       Object.entries(layerVisibility).forEach(([layerName, visible]) => {
-        mapService.toggleLayer(layerName, visible);
+        if (layerName === 'treesByVulnerability') {
+          // Handle tree vulnerability level visibility
+          Object.entries(visible).forEach(([level, levelVisible]) => {
+            const levelLayerName = `treesLevel${level}`;
+            mapService.toggleLayer(levelLayerName, levelVisible);
+          });
+        } else {
+          mapService.toggleLayer(layerName, visible);
+        }
       });
     }
   }, [layerVisibility]);
@@ -120,6 +128,22 @@ const MapContainer = () => {
               <div className="w-3 h-3 bg-orange-400 rounded-full"></div>
               <span>交叉路口 Intersections</span>
             </div>
+            {mapData && mapData.tree_count > 0 && (
+              <>
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                  <span>樹木-高風險 Trees Level I</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
+                  <span>樹木-中風險 Trees Level II</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  <span>樹木-低風險 Trees Level III</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

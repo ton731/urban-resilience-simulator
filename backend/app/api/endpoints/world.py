@@ -9,6 +9,7 @@ from app.schemas.response import (
     MapBoundaryResponse,
     MapNodeResponse, 
     RoadEdgeResponse,
+    TreeResponse,
     ErrorResponse
 )
 from app.core.world_synthesizer.map_generator import MapGenerator
@@ -23,18 +24,19 @@ router = APIRouter()
         400: {"model": ErrorResponse, "description": "Invalid request parameters"},
         500: {"model": ErrorResponse, "description": "Internal server error"}
     },
-    summary="Generate World Map (WS-1.1)",
+    summary="Generate World Map (WS-1.1 + WS-1.2)",
     description="""
-    Generates a procedural 2D map with road network according to WS-1.1 specifications.
+    Generates a procedural 2D map with road network and trees according to WS-1.1 + WS-1.2 specifications.
     
     Creates:
     - 2D grid map with geographical boundaries
     - Random but logical road networks (main roads and secondary roads)
+    - Trees along road edges with vulnerability levels (WS-1.2)
     - Graph data structure with nodes and edges
     - Configurable generation parameters
     
-    The generated map includes intersections, road segments with properties
-    like width, lanes, and speed limits, suitable for disaster simulation.
+    The generated map includes intersections, road segments, and trees with properties
+    suitable for disaster simulation.
     """
 )
 async def generate_world(request: WorldGenerationRequest):
@@ -56,8 +58,22 @@ async def generate_world(request: WorldGenerationRequest):
             "map_size": request.map_size,
             "road_density": request.road_density,
             "main_road_count": request.main_road_count,
-            "secondary_road_density": request.secondary_road_density
+            "secondary_road_density": request.secondary_road_density,
+            # Tree generation parameters (WS-1.2)
+            "tree_spacing": request.tree_spacing,
+            "tree_max_offset": request.tree_max_offset,
+            "tree_road_buffer": 3.0,  # From config
+            "tree_height_range": [4.0, 25.0],  # From config
+            "tree_trunk_width_range": [0.2, 1.5],  # From config
         }
+        
+        # Set vulnerability distribution
+        if request.vulnerability_distribution:
+            config["vulnerability_distribution"] = request.vulnerability_distribution
+        else:
+            config["vulnerability_distribution"] = {
+                "I": 0.1, "II": 0.3, "III": 0.6
+            }
         
         # Apply any configuration overrides
         if request.config_override:
@@ -77,7 +93,7 @@ async def generate_world(request: WorldGenerationRequest):
         
         # Initialize map generator and generate map
         generator = MapGenerator(config)
-        generated_map = generator.generate_map()
+        generated_map = generator.generate_map(include_trees=request.include_trees)
         
         # Convert to response format
         generation_id = f"gen_{uuid.uuid4().hex[:12]}"
@@ -95,6 +111,20 @@ async def generate_world(request: WorldGenerationRequest):
             for edge_id, edge in generated_map.edges.items()
         }
         
+        # Build trees response (WS-1.2)
+        trees_response = {}
+        tree_stats = None
+        if request.include_trees and generated_map.trees:
+            trees_response = {
+                tree_id: TreeResponse(**tree.to_dict())
+                for tree_id, tree in generated_map.trees.items()
+            }
+            
+            # Calculate tree statistics
+            from app.core.world_synthesizer.tree_generator import TreeGenerator
+            tree_generator = TreeGenerator(config)
+            tree_stats = tree_generator.get_generation_stats(generated_map.trees)
+        
         # Calculate road type counts
         main_road_count = sum(1 for edge in generated_map.edges.values() 
                              if edge.road_type == "main")
@@ -107,10 +137,13 @@ async def generate_world(request: WorldGenerationRequest):
             boundary=boundary_response,
             nodes=nodes_response,
             edges=edges_response,
+            trees=trees_response,
             node_count=len(generated_map.nodes),
             edge_count=len(generated_map.edges),
+            tree_count=len(generated_map.trees),
             main_road_count=main_road_count,
             secondary_road_count=secondary_road_count,
+            tree_stats=tree_stats,
             generation_config=config
         )
         
@@ -156,5 +189,14 @@ async def get_default_config():
         "main_road_lanes": 4,
         "secondary_road_lanes": 2,
         "main_road_speed_limit": 70.0,
-        "secondary_road_speed_limit": 40.0
+        "secondary_road_speed_limit": 40.0,
+        # Tree generation defaults (WS-1.2)
+        "include_trees": True,
+        "tree_spacing": 25.0,
+        "tree_max_offset": 8.0,
+        "vulnerability_distribution": {
+            "I": 0.1,
+            "II": 0.3,
+            "III": 0.6
+        }
     }

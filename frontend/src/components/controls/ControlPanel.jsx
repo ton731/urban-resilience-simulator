@@ -14,6 +14,7 @@ const ControlPanel = () => {
     generateWorld,
     clearMapData,
     toggleLayer,
+    toggleTreeVulnerability,
     resetConfig,
     clearError
   } = useSimulationStore();
@@ -134,6 +135,108 @@ const ControlPanel = () => {
               />
             </div>
 
+            {/* Tree Generation Toggle */}
+            <div className="pt-2 border-t border-gray-200">
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={localConfig.include_trees}
+                  onChange={(e) => handleConfigChange('include_trees', e.target.checked)}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-2"
+                />
+                <span className="text-sm font-medium text-gray-700">
+                  生成樹木 (Generate Trees) - WS-1.2
+                </span>
+              </label>
+            </div>
+
+            {/* Tree Parameters - Only show if trees are enabled */}
+            {localConfig.include_trees && (
+              <>
+                {/* Tree Spacing */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    樹木間距 (Tree Spacing): {localConfig.tree_spacing.toFixed(0)}m
+                  </label>
+                  <input
+                    type="range"
+                    min="10"
+                    max="100"
+                    step="5"
+                    value={localConfig.tree_spacing}
+                    onChange={(e) => handleConfigChange('tree_spacing', parseFloat(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Tree Max Offset */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    樹木偏移 (Max Offset): {localConfig.tree_max_offset.toFixed(0)}m
+                  </label>
+                  <input
+                    type="range"
+                    min="2"
+                    max="20"
+                    step="1"
+                    value={localConfig.tree_max_offset}
+                    onChange={(e) => handleConfigChange('tree_max_offset', parseFloat(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Vulnerability Distribution */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    脆弱度分佈 (Vulnerability Distribution)
+                  </label>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center">
+                        <div className="w-3 h-3 bg-red-500 rounded-full mr-2"></div>
+                        Level I (高風險):
+                      </span>
+                      <span>{(localConfig.vulnerability_distribution.I * 100).toFixed(0)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.05"
+                      max="0.5"
+                      step="0.05"
+                      value={localConfig.vulnerability_distribution.I}
+                      onChange={(e) => {
+                        const newI = parseFloat(e.target.value);
+                        const remaining = 1 - newI;
+                        const ratio = localConfig.vulnerability_distribution.II / (localConfig.vulnerability_distribution.II + localConfig.vulnerability_distribution.III);
+                        handleConfigChange('vulnerability_distribution', {
+                          I: newI,
+                          II: remaining * ratio,
+                          III: remaining * (1 - ratio)
+                        });
+                      }}
+                      className="w-full"
+                    />
+                    
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center">
+                        <div className="w-3 h-3 bg-orange-500 rounded-full mr-2"></div>
+                        Level II (中風險):
+                      </span>
+                      <span>{(localConfig.vulnerability_distribution.II * 100).toFixed(0)}%</span>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center">
+                        <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
+                        Level III (低風險):
+                      </span>
+                      <span>{(localConfig.vulnerability_distribution.III * 100).toFixed(0)}%</span>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
             {/* Action Buttons */}
             <div className="grid grid-cols-2 gap-2 pt-2">
               <Button
@@ -160,6 +263,7 @@ const ControlPanel = () => {
         {/* Layer Controls */}
         <Card title="圖層控制 (Layer Controls)">
           <div className="space-y-3">
+            {/* Road Layers */}
             {Object.entries({
               nodes: '節點 (Nodes)',
               mainRoads: '主幹道 (Main Roads)', 
@@ -175,6 +279,52 @@ const ControlPanel = () => {
                 <span className="ml-2 text-sm text-gray-700">{layerLabel}</span>
               </label>
             ))}
+            
+            {/* Tree Layers */}
+            {mapStats && mapStats.totalTrees > 0 && (
+              <>
+                <div className="border-t border-gray-200 pt-3 mt-3">
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={layerVisibility.trees}
+                      onChange={() => toggleLayer('trees')}
+                      className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                    />
+                    <span className="ml-2 text-sm text-gray-700 font-medium">
+                      🌳 樹木 (Trees) - {mapStats.totalTrees}
+                    </span>
+                  </label>
+                </div>
+                
+                {/* Tree vulnerability levels */}
+                <div className="ml-4 space-y-2">
+                  {[
+                    { level: 'I', label: '高風險 High Risk', color: 'text-red-600', bgColor: 'bg-red-500' },
+                    { level: 'II', label: '中風險 Medium Risk', color: 'text-orange-600', bgColor: 'bg-orange-500' },
+                    { level: 'III', label: '低風險 Low Risk', color: 'text-green-600', bgColor: 'bg-green-500' }
+                  ].map(({ level, label, color, bgColor }) => {
+                    const count = mapStats.treeStats?.vulnerability_distribution?.[level] || 0;
+                    const percentage = mapStats.treeStats?.vulnerability_percentages?.[level] || 0;
+                    
+                    return (
+                      <label key={level} className="flex items-center text-xs">
+                        <input
+                          type="checkbox"
+                          checked={layerVisibility.treesByVulnerability?.[level]}
+                          onChange={() => toggleTreeVulnerability(level)}
+                          className={`rounded border-gray-300 focus:ring-2 ${color.replace('text-', 'text-')} focus:ring-${color.split('-')[1]}-500`}
+                        />
+                        <div className={`ml-2 w-2 h-2 ${bgColor} rounded-full`}></div>
+                        <span className={`ml-1 ${color}`}>
+                          Level {level}: {count} ({percentage}%)
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         </Card>
 
@@ -198,6 +348,12 @@ const ControlPanel = () => {
                 <span className="text-gray-600">次要道路:</span>
                 <span className="font-medium text-blue-600">{mapStats.secondaryRoads}</span>
               </div>
+              {mapStats.totalTrees > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600">樹木總數:</span>
+                  <span className="font-medium text-green-600">{mapStats.totalTrees}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-gray-600">地圖大小:</span>
                 <span className="font-medium">{mapStats.mapSize}</span>

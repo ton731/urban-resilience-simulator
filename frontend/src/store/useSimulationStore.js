@@ -17,7 +17,16 @@ const useSimulationStore = create((set, get) => ({
     map_size: [2000, 2000],
     road_density: 0.7,
     main_road_count: 4,
-    secondary_road_density: 0.5
+    secondary_road_density: 0.5,
+    // Tree generation parameters (WS-1.2)
+    include_trees: true,
+    tree_spacing: 25.0,
+    tree_max_offset: 8.0,
+    vulnerability_distribution: {
+      I: 0.1,
+      II: 0.3,
+      III: 0.6
+    }
   },
   defaultConfig: null,
   
@@ -31,7 +40,13 @@ const useSimulationStore = create((set, get) => ({
     nodes: true,
     mainRoads: true,
     secondaryRoads: true,
-    edges: true
+    edges: true,
+    trees: true,
+    treesByVulnerability: {
+      I: true,   // High risk trees
+      II: true,  // Medium risk trees
+      III: true  // Low risk trees
+    }
   },
   
   // Statistics
@@ -83,10 +98,12 @@ const useSimulationStore = create((set, get) => ({
       const mapStats = {
         totalNodes: mapData.node_count,
         totalEdges: mapData.edge_count,
+        totalTrees: mapData.tree_count || 0,
         mainRoads: mapData.main_road_count,
         secondaryRoads: mapData.secondary_road_count,
         mapSize: `${mapData.boundary.width}m × ${mapData.boundary.height}m`,
-        generationId: mapData.generation_id
+        generationId: mapData.generation_id,
+        treeStats: mapData.tree_stats || null
       };
 
       set({ 
@@ -152,7 +169,13 @@ const useSimulationStore = create((set, get) => ({
       nodes: true,
       mainRoads: true,
       secondaryRoads: true,
-      edges: true
+      edges: true,
+      trees: true,
+      treesByVulnerability: {
+        I: true,
+        II: true,
+        III: true
+      }
     }
   }),
 
@@ -180,9 +203,37 @@ const useSimulationStore = create((set, get) => ({
       'Map Size': `${generationConfig.map_size[0]} × ${generationConfig.map_size[1]} meters`,
       'Road Density': `${(generationConfig.road_density * 100).toFixed(0)}%`,
       'Main Roads': generationConfig.main_road_count,
-      'Secondary Road Density': `${(generationConfig.secondary_road_density * 100).toFixed(0)}%`
+      'Secondary Road Density': `${(generationConfig.secondary_road_density * 100).toFixed(0)}%`,
+      'Trees Enabled': generationConfig.include_trees ? 'Yes' : 'No',
+      'Tree Spacing': `${generationConfig.tree_spacing}m`,
+      'Tree Max Offset': `${generationConfig.tree_max_offset}m`
     };
-  }
+  },
+
+  /**
+   * Toggle tree vulnerability level visibility
+   * @param {string} level - Vulnerability level (I, II, III)
+   */
+  toggleTreeVulnerability: (level) => set((state) => ({
+    layerVisibility: {
+      ...state.layerVisibility,
+      treesByVulnerability: {
+        ...state.layerVisibility.treesByVulnerability,
+        [level]: !state.layerVisibility.treesByVulnerability[level]
+      }
+    }
+  })),
+
+  /**
+   * Update vulnerability distribution
+   * @param {Object} distribution - New vulnerability distribution
+   */
+  updateVulnerabilityDistribution: (distribution) => set((state) => ({
+    generationConfig: {
+      ...state.generationConfig,
+      vulnerability_distribution: distribution
+    }
+  }))
 }));
 
 export default useSimulationStore;

@@ -33,8 +33,18 @@ class RoadEdgeResponse(BaseModel):
     speed_limit: float = Field(description="Speed limit in km/h")
 
 
+class TreeResponse(BaseModel):
+    """Tree object information (WS-1.2)"""
+    id: str
+    x: float
+    y: float
+    vulnerability_level: str = Field(description="Vulnerability level: I (high), II (medium), III (low)")
+    height: float = Field(description="Tree height in meters")
+    trunk_width: float = Field(description="Tree trunk width in meters")
+
+
 class WorldGenerationResponse(BaseModel):
-    """Response schema for world generation API (WS-1.1)"""
+    """Response schema for world generation API (WS-1.1 + WS-1.2)"""
     
     # Generation metadata
     generation_id: str = Field(description="Unique identifier for this world generation")
@@ -44,12 +54,17 @@ class WorldGenerationResponse(BaseModel):
     boundary: MapBoundaryResponse
     nodes: Dict[str, MapNodeResponse] = Field(description="Road network nodes indexed by ID")
     edges: Dict[str, RoadEdgeResponse] = Field(description="Road network edges indexed by ID")
+    trees: Dict[str, TreeResponse] = Field(description="Trees indexed by ID (WS-1.2)")
     
     # Summary statistics  
     node_count: int = Field(description="Total number of nodes in the road network")
     edge_count: int = Field(description="Total number of road segments")
+    tree_count: int = Field(description="Total number of trees")
     main_road_count: int = Field(description="Number of main roads")
     secondary_road_count: int = Field(description="Number of secondary roads")
+    
+    # Tree statistics (WS-1.2)
+    tree_stats: Optional[Dict[str, Any]] = Field(description="Tree generation statistics")
     
     # Generation parameters used
     generation_config: Dict[str, Any] = Field(description="Configuration parameters used for generation")
@@ -87,13 +102,31 @@ class WorldGenerationResponse(BaseModel):
                         "speed_limit": 40.0
                     }
                 },
+                "trees": {
+                    "tree_001": {
+                        "id": "tree_001",
+                        "x": 520.5,
+                        "y": 485.2,
+                        "vulnerability_level": "II",
+                        "height": 12.5,
+                        "trunk_width": 0.8
+                    }
+                },
                 "node_count": 45,
                 "edge_count": 38,
+                "tree_count": 156,
                 "main_road_count": 4,
                 "secondary_road_count": 34,
+                "tree_stats": {
+                    "total_trees": 156,
+                    "vulnerability_distribution": {"I": 15, "II": 47, "III": 94},
+                    "average_height": 10.8,
+                    "average_trunk_width": 0.6
+                },
                 "generation_config": {
                     "map_size": [2000, 2000],
-                    "road_density": 0.7
+                    "road_density": 0.7,
+                    "include_trees": True
                 }
             }
         }

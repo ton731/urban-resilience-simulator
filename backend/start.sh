@@ -1,2 +1,2 @@
 export PYTHONPATH="$PWD:$PWD/backend:$PYTHONPATH"
-python backend/app/main.py
+python app/main.py

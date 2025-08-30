@@ -86,3 +86,5 @@ When implementing this project, follow the technical architecture specified in `
 - Please write a test script to demo the input/output of the new-added feature if necessary after your implementation.
 - Don't write READMEs after implementation.
 - Backend is already deployed on http://0.0.0.0:8000 . If you need to test it, don't deploy it yourself, use this deployed endpoint
+- Don't run python scripts by your own.
+- Don't pip install python packages by your own, please ask me to do it, since I need to activate conda env and you will run into some problem if you do it yourself.

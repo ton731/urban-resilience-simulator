@@ -84,6 +84,7 @@ class GeneratedMap:
     boundary: MapBoundary
     nodes: Dict[str, MapNode] = field(default_factory=dict)
     edges: Dict[str, RoadEdge] = field(default_factory=dict)
+    trees: Dict[str, Any] = field(default_factory=dict)  # Will contain Tree objects
     graph: nx.Graph = field(default_factory=nx.Graph)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -91,8 +92,10 @@ class GeneratedMap:
             "boundary": self.boundary.to_dict(),
             "nodes": {node_id: node.to_dict() for node_id, node in self.nodes.items()},
             "edges": {edge_id: edge.to_dict() for edge_id, edge in self.edges.items()},
+            "trees": {tree_id: tree.to_dict() for tree_id, tree in self.trees.items()},
             "node_count": len(self.nodes),
-            "edge_count": len(self.edges)
+            "edge_count": len(self.edges),
+            "tree_count": len(self.trees)
         }
 
 
@@ -118,12 +121,15 @@ class MapGenerator:
         self.main_road_lanes = 4
         self.secondary_road_lanes = 2
         
-    def generate_map(self) -> GeneratedMap:
+    def generate_map(self, include_trees: bool = True) -> GeneratedMap:
         """
-        Main method to generate a complete map with road network.
+        Main method to generate a complete map with road network and trees.
+        
+        Args:
+            include_trees: Whether to generate trees (WS-1.2)
         
         Returns:
-            GeneratedMap: Complete map data with boundaries, nodes, edges, and graph
+            GeneratedMap: Complete map data with boundaries, nodes, edges, trees, and graph
         """
         # Create map boundary
         boundary = MapBoundary(
@@ -140,6 +146,10 @@ class MapGenerator:
         self._generate_main_roads(generated_map)
         self._generate_secondary_roads(generated_map)
         self._build_network_graph(generated_map)
+        
+        # Generate trees along roads (WS-1.2)
+        if include_trees:
+            self._generate_trees(generated_map)
         
         return generated_map
     
@@ -380,3 +390,18 @@ class MapGenerator:
                 )
         
         map_data.graph = graph
+    
+    def _generate_trees(self, map_data: GeneratedMap) -> None:
+        """
+        Generate trees along road edges using TreeGenerator (WS-1.2).
+        """
+        from .tree_generator import TreeGenerator
+        
+        # Create tree generator with configuration
+        tree_generator = TreeGenerator(self.config)
+        
+        # Generate trees for all road edges
+        trees = tree_generator.generate_trees_for_map(map_data)
+        
+        # Add trees to map data
+        map_data.trees = trees

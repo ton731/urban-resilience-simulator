@@ -17,6 +17,16 @@ class Settings(BaseSettings):
     DEFAULT_AMBULANCE_STATIONS: int = 5
     DEFAULT_SHELTERS: int = 10
     
+    # Tree generation defaults (WS-1.2)
+    DEFAULT_INCLUDE_TREES: bool = True
+    DEFAULT_TREE_SPACING: float = 25.0  # meters
+    DEFAULT_TREE_MAX_OFFSET: float = 8.0  # meters
+    DEFAULT_TREE_ROAD_BUFFER: float = 3.0  # meters
+    
+    # Tree physical properties
+    DEFAULT_TREE_HEIGHT_RANGE: List[float] = [4.0, 25.0]  # meters
+    DEFAULT_TREE_TRUNK_WIDTH_RANGE: List[float] = [0.2, 1.5]  # meters
+    
     # Tree vulnerability distribution
     TREE_LEVEL_I_RATIO: float = 0.1  # High risk
     TREE_LEVEL_II_RATIO: float = 0.3  # Medium risk

@@ -25,7 +25,11 @@ class MapService {
       nodes: null,
       edges: null,
       mainRoads: null,
-      secondaryRoads: null
+      secondaryRoads: null,
+      trees: null,
+      treesLevelI: null,
+      treesLevelII: null,
+      treesLevelIII: null
     };
     this.currentMapData = null;
   }
@@ -59,6 +63,10 @@ class MapService {
     this.layers.edges = L.layerGroup().addTo(this.map);
     this.layers.mainRoads = L.layerGroup().addTo(this.map);
     this.layers.secondaryRoads = L.layerGroup().addTo(this.map);
+    this.layers.trees = L.layerGroup().addTo(this.map);
+    this.layers.treesLevelI = L.layerGroup().addTo(this.map);
+    this.layers.treesLevelII = L.layerGroup().addTo(this.map);
+    this.layers.treesLevelIII = L.layerGroup().addTo(this.map);
 
     return this.map;
   }
@@ -78,7 +86,7 @@ class MapService {
     
     // Convert backend coordinates to Leaflet LatLng
     // Backend uses meters, we need to convert to lat/lng for display
-    const { boundary, nodes, edges } = mapData;
+    const { boundary, nodes, edges, trees = {} } = mapData;
     
     // Calculate center and bounds
     const centerX = (boundary.min_x + boundary.max_x) / 2;
@@ -101,6 +109,11 @@ class MapService {
     
     // Add edges (roads) to map
     this.addEdges(edges, convertedNodes);
+    
+    // Add trees to map (WS-1.2)
+    if (trees && Object.keys(trees).length > 0) {
+      this.addTrees(trees, centerX, centerY, metersToLat, metersToLng);
+    }
     
     // Fit map to show all data
     this.fitMapToBounds(boundary, metersToLat, metersToLng);
@@ -204,6 +217,83 @@ class MapService {
   }
 
   /**
+   * Add trees to the map with vulnerability-based styling (WS-1.2)
+   * @param {Object} trees - Tree data from backend
+   * @param {number} centerX - Map center X coordinate
+   * @param {number} centerY - Map center Y coordinate
+   * @param {number} metersToLat - Conversion factor for latitude
+   * @param {number} metersToLng - Conversion factor for longitude
+   */
+  addTrees(trees, centerX, centerY, metersToLat, metersToLng) {
+    Object.entries(trees).forEach(([treeId, tree]) => {
+      // Convert tree coordinates to lat/lng
+      const lat = (tree.y - centerY) * metersToLat;
+      const lng = (tree.x - centerX) * metersToLng;
+
+      // Define tree styling based on vulnerability level
+      const treeStyles = {
+        'I': {   // High vulnerability - Red
+          fillColor: '#dc2626',
+          color: '#7f1d1d',
+          radius: 4,
+          weight: 2
+        },
+        'II': {  // Medium vulnerability - Orange
+          fillColor: '#ea580c',
+          color: '#9a3412',
+          radius: 3,
+          weight: 2
+        },
+        'III': { // Low vulnerability - Green
+          fillColor: '#16a34a',
+          color: '#14532d',
+          radius: 2.5,
+          weight: 1.5
+        }
+      };
+
+      const style = treeStyles[tree.vulnerability_level] || treeStyles['III'];
+
+      // Create tree marker
+      const treeMarker = L.circleMarker([lat, lng], {
+        ...style,
+        opacity: 1,
+        fillOpacity: 0.8
+      });
+
+      // Create detailed popup
+      treeMarker.bindPopup(`
+        <div style="font-family: monospace;">
+          <strong>🌳 樹木 Tree ${treeId.substring(0, 8)}</strong><br/>
+          <hr style="margin: 8px 0;">
+          <strong>位置 Position:</strong> (${tree.x.toFixed(1)}, ${tree.y.toFixed(1)})<br/>
+          <strong>脆弱度 Vulnerability:</strong> Level ${tree.vulnerability_level}<br/>
+          <strong>樹高 Height:</strong> ${tree.height.toFixed(1)}m<br/>
+          <strong>樹幹寬度 Trunk Width:</strong> ${tree.trunk_width.toFixed(2)}m<br/>
+          <hr style="margin: 8px 0;">
+          <small style="color: #666;">
+            ${tree.vulnerability_level === 'I' ? '⚠️ 高風險 High Risk' : 
+              tree.vulnerability_level === 'II' ? '⚡ 中風險 Medium Risk' : 
+              '✅ 低風險 Low Risk'}
+          </small>
+        </div>
+      `);
+
+      // Add to appropriate layers
+      this.layers.trees.addLayer(treeMarker);
+      
+      // Add to vulnerability-specific layers for filtering
+      if (tree.vulnerability_level === 'I') {
+        this.layers.treesLevelI.addLayer(treeMarker);
+      } else if (tree.vulnerability_level === 'II') {
+        this.layers.treesLevelII.addLayer(treeMarker);
+      } else {
+        this.layers.treesLevelIII.addLayer(treeMarker);
+      }
+    });
+  }
+
+  /**
    * Clear all map layers
    */
   clearAllLayers() {
@@ -231,22 +321,30 @@ class MapService {
   }
 
   /**
-   * Get map statistics
+   * Get map statistics including trees
    * @returns {Object} - Map statistics
    */
   getMapStats() {
     if (!this.currentMapData) return null;
 
-    const { nodes, edges } = this.currentMapData;
+    const { nodes, edges, trees = {} } = this.currentMapData;
     const mainRoads = Object.values(edges).filter(edge => edge.road_type === 'main');
     const secondaryRoads = Object.values(edges).filter(edge => edge.road_type === 'secondary');
+
+    // Tree statistics by vulnerability level
+    const treesByLevel = { I: 0, II: 0, III: 0 };
+    Object.values(trees).forEach(tree => {
+      treesByLevel[tree.vulnerability_level] = (treesByLevel[tree.vulnerability_level] || 0) + 1;
+    });
 
     return {
       totalNodes: Object.keys(nodes).length,
       totalEdges: Object.keys(edges).length,
+      totalTrees: Object.keys(trees).length,
       mainRoads: mainRoads.length,
       secondaryRoads: secondaryRoads.length,
-      averageRoadWidth: Object.values(edges).reduce((sum, edge) => sum + edge.width, 0) / Object.keys(edges).length
+      averageRoadWidth: Object.values(edges).reduce((sum, edge) => sum + edge.width, 0) / Object.keys(edges).length,
+      treesByVulnerability: treesByLevel
     };
   }
 
@@ -263,7 +361,11 @@ class MapService {
       nodes: null,
       edges: null,
       mainRoads: null,
-      secondaryRoads: null
+      secondaryRoads: null,
+      trees: null,
+      treesLevelI: null,
+      treesLevelII: null,
+      treesLevelIII: null
     };
   }
 }
