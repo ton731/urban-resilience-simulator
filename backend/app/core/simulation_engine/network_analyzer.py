@@ -237,6 +237,11 @@ class NetworkAnalyzer:
         """
         A* pathfinding algorithm with vehicle constraints and obstruction awareness.
         
+        Implements SE-2.2 requirements:
+        - Cost based on road_length / speed_limit
+        - Dynamic checking of vehicle width vs remaining road width
+        - Infinite cost for impassable roads
+        
         Args:
             start_node: Starting node ID
             end_node: Destination node ID
@@ -343,7 +348,8 @@ class NetworkAnalyzer:
         """
         Calculate the cost of traversing an edge for a specific vehicle.
         
-        Cost is based on travel time considering speed limits and obstructions.
+        Implements SE-2.2 requirement: cost based on road_length / speed_limit
+        with vehicle-specific constraints and obstruction penalties.
         
         Args:
             from_node: Source node ID
@@ -351,29 +357,41 @@ class NetworkAnalyzer:
             vehicle_config: Vehicle configuration
             
         Returns:
-            Edge traversal cost (travel time in seconds)
+            Edge traversal cost (travel time in seconds), or float('inf') if impassable
         """
         edge_data = self.road_graph[from_node][to_node]
         
         distance = edge_data['distance']
         speed_limit = edge_data.get('speed_limit', 40.0)  # km/h
         vehicle_max_speed = vehicle_config.max_speed
-        
-        # Effective speed is limited by both speed limit and vehicle capability
-        effective_speed = min(speed_limit, vehicle_max_speed)
-        
-        # Convert to m/s and calculate travel time
-        speed_ms = effective_speed * 1000 / 3600
-        travel_time = distance / speed_ms
-        
-        # Apply penalty for narrow roads or obstructions
         current_width = edge_data.get('width', 6.0)
         min_required_width = vehicle_config.minimum_road_width
         
-        if current_width < min_required_width * 1.5:  # Tight fit
-            travel_time *= 1.5  # 50% time penalty for difficult navigation
+        # SE-2.2: Check if vehicle can physically pass through
+        if current_width < min_required_width:
+            return float('inf')  # Impassable - infinite cost
         
-        return travel_time
+        # Calculate base travel time using SE-2.2 formula: distance / speed
+        effective_speed = min(speed_limit, vehicle_max_speed)
+        
+        # Convert km/h to m/s
+        speed_ms = effective_speed * 1000 / 3600
+        base_travel_time = distance / speed_ms
+        
+        # Apply penalties for narrow passages and obstructions
+        width_ratio = current_width / edge_data.get('original_width', current_width)
+        
+        if width_ratio < 0.5:
+            # Severely obstructed - high time penalty
+            base_travel_time *= 3.0
+        elif width_ratio < 0.7:
+            # Moderately obstructed - moderate penalty
+            base_travel_time *= 2.0
+        elif current_width < min_required_width * 1.2:
+            # Tight fit - small penalty
+            base_travel_time *= 1.3
+        
+        return base_travel_time
     
     def _calculate_distance(
         self,
@@ -456,8 +474,8 @@ class NetworkAnalyzer:
         """
         Calculate service area (isochrone) from a center point.
         
-        This method finds all points reachable within a given travel time,
-        useful for emergency response coverage analysis.
+        Implements SE-2.2 isochrone generation using Dijkstra's algorithm
+        to find all points reachable within specified travel time.
         
         Args:
             center_point: Center coordinates (x, y)
@@ -479,10 +497,11 @@ class NetworkAnalyzer:
             DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
         )
         
-        # Find all reachable nodes within time limit
+        # Use Dijkstra's algorithm to find all reachable nodes within time limit
         reachable_points = []
+        distances = {center_node: 0.0}
         visited = set()
-        queue = [(0, center_node)]  # (cumulative_time, node_id)
+        queue = [(0.0, center_node)]  # (cumulative_time, node_id)
         
         while queue:
             cumulative_time, current_node = heapq.heappop(queue)
@@ -503,6 +522,104 @@ class NetworkAnalyzer:
                 
                 edge_data = self.road_graph[current_node][neighbor]
                 
+                # Check vehicle compatibility
+                if not self._can_vehicle_use_edge(vehicle_config, edge_data):
+                    continue
+                
+                # Calculate edge travel time
+                travel_time = self._calculate_edge_cost(
+                    current_node, neighbor, vehicle_config
+                )
+                
+                # Skip if infinite cost (impassable)
+                if travel_time == float('inf'):
+                    continue
+                
+                total_time = cumulative_time + travel_time
+                
+                # Only process if within time limit and better than known distance
+                if (total_time <= max_travel_time and 
+                    (neighbor not in distances or total_time < distances[neighbor])):
+                    distances[neighbor] = total_time
+                    heapq.heappush(queue, (total_time, neighbor))
+        
+        # Generate service area boundary
+        if len(reachable_points) < 3:
+            return reachable_points
+        
+        # Create convex hull for service area boundary
+        try:
+            from shapely.geometry import MultiPoint
+            points = MultiPoint(reachable_points)
+            convex_hull = points.convex_hull
+            
+            if hasattr(convex_hull, 'exterior'):
+                return list(convex_hull.exterior.coords)
+            else:
+                return reachable_points
+                
+        except Exception:
+            # Fallback to original points if convex hull fails
+            return reachable_points
+    
+    def calculate_multiple_isochrones(
+        self,
+        center_point: Tuple[float, float],
+        vehicle_type: VehicleType,
+        time_intervals: List[float]
+    ) -> Dict[float, List[Tuple[float, float]]]:
+        """
+        Calculate multiple isochrones for different time intervals.
+        
+        More efficient than calling calculate_service_area multiple times
+        as it reuses the Dijkstra computation.
+        
+        Args:
+            center_point: Center coordinates (x, y)
+            vehicle_type: Type of vehicle for constraints
+            time_intervals: List of time intervals in seconds
+            
+        Returns:
+            Dictionary mapping time intervals to service area coordinates
+        """
+        if not self.road_graph or not time_intervals:
+            return {}
+        
+        center_node = self._find_nearest_node(center_point)
+        if not center_node:
+            return {}
+        
+        vehicle_config = self.vehicle_configs.get(
+            vehicle_type,
+            DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
+        )
+        
+        # Sort time intervals for efficient processing
+        sorted_intervals = sorted(time_intervals)
+        max_time = max(sorted_intervals)
+        
+        # Run single Dijkstra to find all reachable nodes
+        distances = {center_node: 0.0}
+        visited = set()
+        queue = [(0.0, center_node)]
+        node_times = {}  # node_id -> travel_time
+        
+        while queue:
+            cumulative_time, current_node = heapq.heappop(queue)
+            
+            if current_node in visited or cumulative_time > max_time:
+                continue
+            
+            visited.add(current_node)
+            node_times[current_node] = cumulative_time
+            
+            # Explore neighbors
+            for neighbor in self.road_graph.neighbors(current_node):
+                if neighbor in visited:
+                    continue
+                
+                edge_data = self.road_graph[current_node][neighbor]
+                
                 if not self._can_vehicle_use_edge(vehicle_config, edge_data):
                     continue
                 
@@ -510,11 +627,120 @@ class NetworkAnalyzer:
                     current_node, neighbor, vehicle_config
                 )
                 
+                if travel_time == float('inf'):
+                    continue
+                
                 total_time = cumulative_time + travel_time
                 
-                if total_time <= max_travel_time:
+                if (total_time <= max_time and 
+                    (neighbor not in distances or total_time < distances[neighbor])):
+                    distances[neighbor] = total_time
                     heapq.heappush(queue, (total_time, neighbor))
         
-        # Generate convex hull or more sophisticated boundary
-        # For now, return the reachable points directly
-        return reachable_points
+        # Generate isochrones for each time interval
+        isochrones = {}
+        
+        for time_limit in sorted_intervals:
+            reachable_points = []
+            
+            for node_id, travel_time in node_times.items():
+                if travel_time <= time_limit:
+                    node_data = self.road_graph.nodes[node_id]
+                    reachable_points.append((node_data['x'], node_data['y']))
+            
+            # Generate boundary for this time interval
+            if len(reachable_points) >= 3:
+                try:
+                    from shapely.geometry import MultiPoint
+                    points = MultiPoint(reachable_points)
+                    convex_hull = points.convex_hull
+                    
+                    if hasattr(convex_hull, 'exterior'):
+                        isochrones[time_limit] = list(convex_hull.exterior.coords)
+                    else:
+                        isochrones[time_limit] = reachable_points
+                except Exception:
+                    isochrones[time_limit] = reachable_points
+            else:
+                isochrones[time_limit] = reachable_points
+        
+        return isochrones
+    
+    def analyze_road_network_connectivity(
+        self,
+        vehicle_type: VehicleType
+    ) -> Dict[str, Any]:
+        """
+        Analyze road network connectivity for a specific vehicle type.
+        
+        Useful for understanding how obstructions affect overall network accessibility.
+        
+        Args:
+            vehicle_type: Type of vehicle for analysis
+            
+        Returns:
+            Dictionary with connectivity statistics
+        """
+        if not self.road_graph:
+            return {}
+        
+        vehicle_config = self.vehicle_configs.get(
+            vehicle_type,
+            DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
+        )
+        
+        total_edges = 0
+        passable_edges = 0
+        blocked_edges = 0
+        severely_obstructed_edges = 0
+        
+        total_road_length = 0.0
+        passable_road_length = 0.0
+        
+        for u, v, edge_data in self.road_graph.edges(data=True):
+            total_edges += 1
+            distance = edge_data.get('distance', 0.0)
+            total_road_length += distance
+            
+            current_width = edge_data.get('width', 6.0)
+            original_width = edge_data.get('original_width', current_width)
+            min_required_width = vehicle_config.minimum_road_width
+            
+            if current_width >= min_required_width:
+                passable_edges += 1
+                passable_road_length += distance
+                
+                # Check obstruction level
+                width_ratio = current_width / original_width
+                if width_ratio < 0.5:
+                    severely_obstructed_edges += 1
+            else:
+                blocked_edges += 1
+        
+        # Calculate connected components for passable roads
+        passable_graph = self.road_graph.copy()
+        edges_to_remove = []
+        
+        for u, v, edge_data in passable_graph.edges(data=True):
+            current_width = edge_data.get('width', 6.0)
+            if current_width < vehicle_config.minimum_road_width:
+                edges_to_remove.append((u, v))
+        
+        passable_graph.remove_edges_from(edges_to_remove)
+        
+        import networkx as nx
+        connected_components = list(nx.connected_components(passable_graph))
+        
+        return {
+            'vehicle_type': vehicle_type.value,
+            'total_edges': total_edges,
+            'passable_edges': passable_edges,
+            'blocked_edges': blocked_edges,
+            'severely_obstructed_edges': severely_obstructed_edges,
+            'passability_percentage': (passable_edges / total_edges * 100) if total_edges > 0 else 0,
+            'total_road_length_km': total_road_length / 1000,
+            'passable_road_length_km': passable_road_length / 1000,
+            'connected_components': len(connected_components),
+            'largest_component_size': max(len(comp) for comp in connected_components) if connected_components else 0,
+            'network_fragmentation': len(connected_components) > 1
+        }

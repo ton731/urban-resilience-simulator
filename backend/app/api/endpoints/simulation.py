@@ -83,6 +83,7 @@ async def simulate_disaster(request: DisasterSimulationRequest):
         # Extract world data
         trees_data = world_data.get("trees", {})
         roads_data = world_data.get("edges", {})  # Road edges
+        nodes_data = world_data.get("nodes", {})  # Road nodes for geometry
         
         if not trees_data:
             raise HTTPException(
@@ -90,9 +91,9 @@ async def simulate_disaster(request: DisasterSimulationRequest):
                 detail="No trees found in the world generation. Ensure trees were generated with include_trees=True"
             )
         
-        # Run disaster simulation
+        # Run disaster simulation with node data for precise geometry
         logger.info(f"Running disaster simulation on world {request.world_generation_id} with intensity {request.disaster_intensity}")
-        simulation_result = disaster_simulator.simulate_tree_collapse(trees_data, roads_data)
+        simulation_result = disaster_simulator.simulate_tree_collapse(trees_data, roads_data, nodes_data)
         
         # Store simulation result for later use
         _simulation_results[simulation_result.simulation_id] = {
@@ -365,6 +366,87 @@ async def list_simulations():
         })
     
     return {"simulations": simulations}
+
+
+@router.post("/network-analysis", response_model=Dict[str, Any])
+async def analyze_network_connectivity(
+    world_generation_id: str,
+    vehicle_type: str = "car",
+    simulation_id: Optional[str] = None
+):
+    """
+    Analyze road network connectivity for a specific vehicle type.
+    
+    This endpoint implements SE-2.2 network analysis capabilities to assess
+    how disaster-related obstructions affect network accessibility.
+    
+    Args:
+        world_generation_id: ID of the generated world
+        vehicle_type: Type of vehicle for analysis
+        simulation_id: Optional simulation ID for post-disaster analysis
+        
+    Returns:
+        Network connectivity analysis results
+    """
+    try:
+        # Validate world generation exists
+        if world_generation_id not in _world_states:
+            raise HTTPException(
+                status_code=404,
+                detail=f"World generation {world_generation_id} not found"
+            )
+        
+        # Get network analyzer
+        network_analyzer = None
+        
+        if simulation_id:
+            # Post-disaster analysis
+            if simulation_id not in _network_analyzers:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Simulation {simulation_id} not found. Run disaster simulation first"
+                )
+            network_analyzer = _network_analyzers[simulation_id]
+        else:
+            # Pre-disaster analysis
+            world_data = _world_states[world_generation_id]
+            network_analyzer = NetworkAnalyzer()
+            network_analyzer.initialize_road_network(
+                world_data.get("nodes", {}),
+                world_data.get("edges", {})
+            )
+        
+        # Validate vehicle type
+        try:
+            vehicle_type_enum = VehicleType(vehicle_type.lower())
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid vehicle type: {vehicle_type}. Valid types: {[v.value for v in VehicleType]}"
+            )
+        
+        # Perform network connectivity analysis
+        logger.info(f"Analyzing network connectivity for {vehicle_type} in world {world_generation_id}")
+        
+        connectivity_stats = network_analyzer.analyze_road_network_connectivity(vehicle_type_enum)
+        
+        return {
+            "world_generation_id": world_generation_id,
+            "simulation_id": simulation_id,
+            "analysis_type": "network_connectivity",
+            "vehicle_type": vehicle_type,
+            "connectivity_analysis": connectivity_stats,
+            "analyzed_at": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in network analysis: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error during network analysis: {str(e)}"
+        )
 
 
 @router.get("/simulation/{simulation_id}")
