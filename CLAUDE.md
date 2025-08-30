@@ -89,3 +89,4 @@ When implementing this project, follow the technical architecture specified in `
 - Don't run python scripts by your own.
 - Don't pip install python packages by your own, please ask me to do it, since I need to activate conda env and you will run into some problem if you do it yourself.
 - Don't need to write test scripts for both backend and frontend
+- Don't run "npm run dev" or other starting command for the frontend web page. I will test it manually

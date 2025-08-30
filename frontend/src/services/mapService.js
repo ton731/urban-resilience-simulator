@@ -61,6 +61,14 @@ class MapService {
       opacity: 0.3 // Make it semi-transparent so our roads are more visible
     }).addTo(this.map);
 
+    // Add scale control to show distance measurements
+    L.control.scale({
+      position: 'bottomright',
+      metric: true,
+      imperial: false,
+      maxWidth: 200
+    }).addTo(this.map);
+
     // Initialize layer groups
     this.layers.nodes = L.layerGroup().addTo(this.map);
     this.layers.edges = L.layerGroup().addTo(this.map);
