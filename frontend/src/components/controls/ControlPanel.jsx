@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import useSimulationStore from '../../store/useSimulationStore';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
+import DisasterSimulationPanel from './DisasterSimulationPanel';
 
 const ControlPanel = () => {
   const {
@@ -508,6 +509,9 @@ const ControlPanel = () => {
             </div>
           </Card>
         )}
+        
+        {/* Disaster Simulation Panel */}
+        <DisasterSimulationPanel />
 
         {/* Error Display */}
         {error && (

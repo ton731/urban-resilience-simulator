@@ -9,7 +9,10 @@ const MapContainer = () => {
   const { 
     mapData, 
     layerVisibility, 
-    isLoading 
+    isLoading,
+    disasterSimulationData,
+    disasterLayerVisibility,
+    isRunningSimulation
   } = useSimulationStore();
 
   // Initialize map on component mount
@@ -72,17 +75,41 @@ const MapContainer = () => {
     }
   }, [layerVisibility]);
 
+  // Update map with disaster simulation data
+  useEffect(() => {
+    if (disasterSimulationData && mapInstanceRef.current) {
+      try {
+        console.log('🔥 Updating map with disaster simulation data...');
+        mapService.updateDisasterData(disasterSimulationData);
+        console.log('✅ Disaster simulation visualization updated successfully');
+      } catch (error) {
+        console.error('❌ Failed to update disaster visualization:', error);
+      }
+    }
+  }, [disasterSimulationData]);
+
+  // Update disaster layer visibility when settings change
+  useEffect(() => {
+    if (mapInstanceRef.current && disasterSimulationData) {
+      Object.entries(disasterLayerVisibility).forEach(([layerName, visible]) => {
+        mapService.toggleDisasterLayer(layerName, visible);
+      });
+    }
+  }, [disasterLayerVisibility, disasterSimulationData]);
+
   return (
     <div className="relative flex-1 bg-gray-100">
       {/* Loading Overlay */}
-      {isLoading && (
+      {(isLoading || isRunningSimulation) && (
         <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg flex items-center space-x-3">
             <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span className="text-lg font-medium text-gray-900">生成地圖中...</span>
+            <span className="text-lg font-medium text-gray-900">
+              {isLoading ? '生成地圖中...' : isRunningSimulation ? '災害模擬中...' : '處理中...'}
+            </span>
           </div>
         </div>
       )}
@@ -295,6 +322,56 @@ const MapContainer = () => {
                     fontSize: '11px'
                   }}>🏭</div>
                   <span>工業建築 Industrial</span>
+                </div>
+              </>
+            )}
+            
+            {/* Disaster Simulation Legend */}
+            {disasterSimulationData && (
+              <>
+                <div className="border-t border-gray-300 pt-2 mt-2">
+                  <h5 className="font-medium mb-1 text-orange-800">🔥 災害模擬結果</h5>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '20px',
+                    height: '3px',
+                    background: '#8B4513',
+                    borderRadius: '2px'
+                  }}></div>
+                  <span>倒塌樹木 Collapsed Trees</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '12px',
+                    height: '12px',
+                    background: '#8FBC8F',
+                    border: '2px solid #654321',
+                    borderRadius: '50%'
+                  }}></div>
+                  <span>樹冠 Tree Crowns</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '16px',
+                    height: '16px',
+                    background: 'rgba(255, 107, 107, 0.3)',
+                    border: '2px dashed #FF6B6B'
+                  }}></div>
+                  <span>樹木阻塞區域 Tree Blockage</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '16px',
+                    height: '16px',
+                    background: 'rgba(255, 68, 68, 0.5)',
+                    border: '3px dashed #FF4444'
+                  }}></div>
+                  <span>道路阻塞 Road Obstructions</span>
+                </div>
+                <div className="text-xs text-orange-700 mt-1">
+                  總計 {disasterSimulationData.total_trees_affected} 棵樹倒塌，
+                  {disasterSimulationData.total_roads_affected} 條道路受影響
                 </div>
               </>
             )}

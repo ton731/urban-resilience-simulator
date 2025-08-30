@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.endpoints import world
+from app.api.endpoints import world, simulation
 from app.core.config import settings
 
 app = FastAPI(
@@ -20,6 +20,7 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(world.router, prefix="/api/v1", tags=["world"])
+app.include_router(simulation.router, prefix="/api/v1", tags=["simulation"])
 
 @app.get("/")
 async def root():

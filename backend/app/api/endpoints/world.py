@@ -191,6 +191,21 @@ async def generate_world(request: WorldGenerationRequest):
             generation_config=config
         )
         
+        # Store world data for simulation use
+        from app.api.endpoints.simulation import set_world_state
+        world_data = {
+            "generation_id": generation_id,
+            "nodes": {node_id: node.to_dict() for node_id, node in generated_map.nodes.items()},
+            "edges": {edge_id: edge.to_dict() for edge_id, edge in generated_map.edges.items()},
+            "trees": {tree_id: tree.to_dict() for tree_id, tree in generated_map.trees.items()},
+            "facilities": {facility_id: facility.to_dict() for facility_id, facility in generated_map.facilities.items()},
+            "buildings": {building_id: building.to_dict() for building_id, building in generated_map.buildings.items()},
+            "boundary": generated_map.boundary.to_dict(),
+            "generated_at": datetime.utcnow().isoformat(),
+            "config": config
+        }
+        set_world_state(generation_id, world_data)
+        
         return response
         
     except HTTPException:

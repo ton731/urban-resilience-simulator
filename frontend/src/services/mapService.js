@@ -37,9 +37,16 @@ class MapService {
       buildingsResidential: null,
       buildingsCommercial: null,
       buildingsMixed: null,
-      buildingsIndustrial: null
+      buildingsIndustrial: null,
+      // Disaster simulation layers (SE-2.1)
+      collapsedTrees: null,
+      treeBlockages: null,
+      roadObstructions: null,
+      servicePath: null,
+      serviceArea: null
     };
     this.currentMapData = null;
+    this.currentDisasterData = null;
   }
 
   /**
@@ -91,6 +98,13 @@ class MapService {
     this.layers.buildingsCommercial = L.layerGroup().addTo(this.map);
     this.layers.buildingsMixed = L.layerGroup().addTo(this.map);
     this.layers.buildingsIndustrial = L.layerGroup().addTo(this.map);
+    
+    // Initialize disaster simulation layers (SE-2.1)
+    this.layers.collapsedTrees = L.layerGroup().addTo(this.map);
+    this.layers.treeBlockages = L.layerGroup().addTo(this.map);
+    this.layers.roadObstructions = L.layerGroup().addTo(this.map);
+    this.layers.servicePath = L.layerGroup().addTo(this.map);
+    this.layers.serviceArea = L.layerGroup().addTo(this.map);
 
     return this.map;
   }
@@ -963,6 +977,218 @@ class MapService {
     };
   }
 
+  // === Disaster Simulation Visualization Methods (SE-2.1) ===
+
+  /**
+   * Update map with disaster simulation results
+   * @param {Object} disasterData - Disaster simulation result data
+   */
+  updateDisasterData(disasterData) {
+    if (!this.map || !this.currentMapData) {
+      console.error('Map or world data not available');
+      return;
+    }
+
+    this.currentDisasterData = disasterData;
+    this.clearDisasterLayers();
+
+    // Get coordinate conversion parameters
+    const { boundary } = this.currentMapData;
+    const centerX = (boundary.min_x + boundary.max_x) / 2;
+    const centerY = (boundary.min_y + boundary.max_y) / 2;
+    const metersToLat = 1 / 111000;
+    const metersToLng = 1 / 111000;
+
+    // Visualize collapsed trees
+    this.addCollapsedTrees(disasterData.disaster_events, centerX, centerY, metersToLat, metersToLng);
+    
+    // Visualize road obstructions
+    this.addRoadObstructions(disasterData.road_obstructions, centerX, centerY, metersToLat, metersToLng);
+  }
+
+  /**
+   * Add collapsed trees visualization with accurate fallen tree representation
+   * @param {Array} disasterEvents - Array of tree collapse events
+   * @param {number} centerX - Map center X coordinate
+   * @param {number} centerY - Map center Y coordinate  
+   * @param {number} metersToLat - Meters to latitude conversion factor
+   * @param {number} metersToLng - Meters to longitude conversion factor
+   */
+  addCollapsedTrees(disasterEvents, centerX, centerY, metersToLat, metersToLng) {
+    if (!disasterEvents || disasterEvents.length === 0) return;
+
+    disasterEvents.forEach(event => {
+      // Convert tree base position
+      const baseLat = (event.location[1] - centerY) * metersToLat;
+      const baseLng = (event.location[0] - centerX) * metersToLng;
+
+      // Calculate fallen tree end position
+      const angleRad = (event.collapse_angle * Math.PI) / 180;
+      const heightInLat = event.tree_height * metersToLat;
+      const heightInLng = event.tree_height * metersToLng;
+      
+      const endLat = baseLat + heightInLat * Math.sin(angleRad);
+      const endLng = baseLng + heightInLng * Math.cos(angleRad);
+
+      // Create line representing the fallen tree trunk
+      // Calculate appropriate trunk width for visualization (scaled for visibility)
+      const trunkWidthPixels = Math.max(3, Math.min(20, event.trunk_width * 8)); // Scale trunk width for visibility
+      const fallenTreeLine = L.polyline([[baseLat, baseLng], [endLat, endLng]], {
+        color: '#8B4513', // Brown color for tree trunk
+        weight: trunkWidthPixels,
+        opacity: 0.9,
+        lineCap: 'round'
+      });
+
+      // Add tree crown circle at the end (using real-world radius in meters)
+      const crownRadiusMeters = Math.max(2, event.tree_height * 0.4); // Crown radius based on tree height in meters
+      const crownCircle = L.circle([endLat, endLng], {
+        color: '#654321',
+        fillColor: '#8FBC8F',
+        fillOpacity: 0.6,
+        radius: crownRadiusMeters, // Leaflet circle radius is in meters when using real coordinates
+        weight: 2
+      });
+
+      // Add popup with tree information
+      const popupContent = `
+        <div class="text-sm">
+          <strong>🌳 倒塌樹木</strong><br/>
+          <strong>樹木ID:</strong> ${event.tree_id}<br/>
+          <strong>倒塌角度:</strong> ${event.collapse_angle.toFixed(1)}°<br/>
+          <strong>樹高:</strong> ${event.tree_height.toFixed(1)}m<br/>
+          <strong>樹幹寬度:</strong> ${event.trunk_width.toFixed(1)}m<br/>
+          <strong>脆弱度等級:</strong> ${event.vulnerability_level}<br/>
+          <strong>嚴重程度:</strong> ${(event.severity * 100).toFixed(1)}%
+        </div>
+      `;
+
+      fallenTreeLine.bindPopup(popupContent);
+      crownCircle.bindPopup(popupContent);
+
+      // Add to collapsed trees layer
+      this.layers.collapsedTrees.addLayer(fallenTreeLine);
+      this.layers.collapsedTrees.addLayer(crownCircle);
+
+      // Add blockage polygon visualization
+      if (event.blockage_polygon && event.blockage_polygon.length > 0) {
+        const blockageCoords = event.blockage_polygon.map(coord => [
+          (coord[1] - centerY) * metersToLat,
+          (coord[0] - centerX) * metersToLng
+        ]);
+
+        const blockagePolygon = L.polygon(blockageCoords, {
+          color: '#FF6B6B',
+          fillColor: '#FF6B6B',
+          fillOpacity: 0.3,
+          weight: 2,
+          dashArray: '5, 5'
+        });
+
+        blockagePolygon.bindPopup(`
+          <div class="text-sm">
+            <strong>🚧 樹木阻塞區域</strong><br/>
+            <strong>造成事件:</strong> ${event.tree_id}<br/>
+            <strong>阻塞面積:</strong> 約 ${(event.blockage_polygon.length * 10).toFixed(1)}m²
+          </div>
+        `);
+
+        this.layers.treeBlockages.addLayer(blockagePolygon);
+      }
+    });
+
+    console.log(`✅ Added ${disasterEvents.length} collapsed trees to visualization`);
+  }
+
+  /**
+   * Add road obstruction visualization
+   * @param {Array} roadObstructions - Array of road obstruction data
+   * @param {number} centerX - Map center X coordinate
+   * @param {number} centerY - Map center Y coordinate
+   * @param {number} metersToLat - Meters to latitude conversion factor
+   * @param {number} metersToLng - Meters to longitude conversion factor
+   */
+  addRoadObstructions(roadObstructions, centerX, centerY, metersToLat, metersToLng) {
+    if (!roadObstructions || roadObstructions.length === 0) return;
+
+    roadObstructions.forEach(obstruction => {
+      if (!obstruction.obstruction_polygon || obstruction.obstruction_polygon.length === 0) return;
+
+      // Convert obstruction polygon coordinates
+      const obstructionCoords = obstruction.obstruction_polygon.map(coord => [
+        (coord[1] - centerY) * metersToLat,
+        (coord[0] - centerX) * metersToLng
+      ]);
+
+      // Create obstruction visualization
+      const obstructionPolygon = L.polygon(obstructionCoords, {
+        color: '#FF4444',
+        fillColor: '#FF4444',
+        fillOpacity: 0.5,
+        weight: 3,
+        dashArray: '10, 5'
+      });
+
+      // Add popup with obstruction information
+      const popupContent = `
+        <div class="text-sm">
+          <strong>🚧 道路阻塞</strong><br/>
+          <strong>道路ID:</strong> ${obstruction.road_edge_id}<br/>
+          <strong>剩餘寬度:</strong> ${obstruction.remaining_width.toFixed(1)}m<br/>
+          <strong>阻塞率:</strong> ${obstruction.blocked_percentage.toFixed(1)}%<br/>
+          <strong>造成事件:</strong> ${obstruction.caused_by_event}
+        </div>
+      `;
+
+      obstructionPolygon.bindPopup(popupContent);
+      this.layers.roadObstructions.addLayer(obstructionPolygon);
+    });
+
+    console.log(`✅ Added ${roadObstructions.length} road obstructions to visualization`);
+  }
+
+  /**
+   * Clear all disaster simulation layers
+   */
+  clearDisasterLayers() {
+    ['collapsedTrees', 'treeBlockages', 'roadObstructions', 'servicePath', 'serviceArea'].forEach(layerName => {
+      if (this.layers[layerName]) {
+        this.layers[layerName].clearLayers();
+      }
+    });
+  }
+
+  /**
+   * Toggle disaster layer visibility
+   * @param {string} layerName - Name of disaster layer
+   * @param {boolean} visible - Whether layer should be visible
+   */
+  toggleDisasterLayer(layerName, visible) {
+    const layer = this.layers[layerName];
+    if (!layer) return;
+
+    if (visible && !this.map.hasLayer(layer)) {
+      this.map.addLayer(layer);
+    } else if (!visible && this.map.hasLayer(layer)) {
+      this.map.removeLayer(layer);
+    }
+  }
+
+  /**
+   * Get disaster simulation statistics
+   * @returns {Object} - Disaster statistics
+   */
+  getDisasterStats() {
+    if (!this.currentDisasterData) return null;
+
+    return {
+      totalCollapsed: this.currentDisasterData.total_trees_affected,
+      totalObstructions: this.currentDisasterData.total_roads_affected,
+      averageBlockage: this.currentDisasterData.average_road_blockage_percentage,
+      collapsedByLevel: this.currentDisasterData.trees_affected_by_level
+    };
+  }
+
   /**
    * Destroy map instance and clean up
    */
@@ -972,6 +1198,7 @@ class MapService {
       this.map = null;
     }
     this.currentMapData = null;
+    this.currentDisasterData = null;
     this.layers = {
       nodes: null,
       edges: null,
@@ -988,7 +1215,13 @@ class MapService {
       buildingsResidential: null,
       buildingsCommercial: null,
       buildingsMixed: null,
-      buildingsIndustrial: null
+      buildingsIndustrial: null,
+      // Disaster simulation layers (SE-2.1)
+      collapsedTrees: null,
+      treeBlockages: null,
+      roadObstructions: null,
+      servicePath: null,
+      serviceArea: null
     };
   }
 }

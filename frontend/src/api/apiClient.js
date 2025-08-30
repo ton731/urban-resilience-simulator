@@ -67,6 +67,78 @@ export const worldAPI = {
   }
 };
 
+// Disaster Simulation API (SE-2.1)
+export const simulationAPI = {
+  /**
+   * Run disaster simulation on a generated world
+   * @param {Object} config - Disaster simulation configuration
+   * @returns {Promise} - API response with disaster simulation results
+   */
+  runDisasterSimulation: async (config) => {
+    try {
+      const response = await apiClient.post('/simulation/disaster', config);
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to run disaster simulation: ${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  /**
+   * Find path between two points with vehicle constraints
+   * @param {Object} pathRequest - Pathfinding request
+   * @returns {Promise} - Path result
+   */
+  findPath: async (pathRequest) => {
+    try {
+      const response = await apiClient.post('/simulation/pathfinding', pathRequest);
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to find path: ${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  /**
+   * Calculate service area from a center point
+   * @param {Object} serviceAreaRequest - Service area request
+   * @returns {Promise} - Service area result
+   */
+  calculateServiceArea: async (serviceAreaRequest) => {
+    try {
+      const response = await apiClient.post('/simulation/service-area', serviceAreaRequest);
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to calculate service area: ${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  /**
+   * Get list of all simulation results
+   * @returns {Promise} - List of simulations
+   */
+  getSimulations: async () => {
+    try {
+      const response = await apiClient.get('/simulation/simulations');
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to get simulations: ${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  /**
+   * Get detailed results for a specific simulation
+   * @param {string} simulationId - Simulation ID
+   * @returns {Promise} - Simulation result details
+   */
+  getSimulationResult: async (simulationId) => {
+    try {
+      const response = await apiClient.get(`/simulation/simulation/${simulationId}`);
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to get simulation result: ${error.response?.data?.detail || error.message}`);
+    }
+  }
+};
+
 // Health check API
 export const healthAPI = {
   /**
