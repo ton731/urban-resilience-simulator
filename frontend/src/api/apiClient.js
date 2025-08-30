@@ -40,9 +40,9 @@ apiClient.interceptors.response.use(
 // World Generation API
 export const worldAPI = {
   /**
-   * Generate a new world map with roads and trees
-   * @param {Object} config - World generation configuration (WS-1.1 + WS-1.2)
-   * @returns {Promise} - API response with generated map data including trees
+   * Generate a new world map with roads, trees, and facilities
+   * @param {Object} config - World generation configuration (WS-1.1 + WS-1.2 + WS-1.3)
+   * @returns {Promise} - API response with generated map data including trees and facilities
    */
   generateWorld: async (config) => {
     try {

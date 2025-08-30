@@ -29,7 +29,10 @@ class MapService {
       trees: null,
       treesLevelI: null,
       treesLevelII: null,
-      treesLevelIII: null
+      treesLevelIII: null,
+      facilities: null,
+      ambulanceStations: null,
+      shelters: null
     };
     this.currentMapData = null;
   }
@@ -67,6 +70,9 @@ class MapService {
     this.layers.treesLevelI = L.layerGroup().addTo(this.map);
     this.layers.treesLevelII = L.layerGroup().addTo(this.map);
     this.layers.treesLevelIII = L.layerGroup().addTo(this.map);
+    this.layers.facilities = L.layerGroup().addTo(this.map);
+    this.layers.ambulanceStations = L.layerGroup().addTo(this.map);
+    this.layers.shelters = L.layerGroup().addTo(this.map);
 
     return this.map;
   }
@@ -86,7 +92,7 @@ class MapService {
     
     // Convert backend coordinates to Leaflet LatLng
     // Backend uses meters, we need to convert to lat/lng for display
-    const { boundary, nodes, edges, trees = {} } = mapData;
+    const { boundary, nodes, edges, trees = {}, facilities = {} } = mapData;
     
     // Calculate center and bounds
     const centerX = (boundary.min_x + boundary.max_x) / 2;
@@ -113,6 +119,11 @@ class MapService {
     // Add trees to map (WS-1.2)
     if (trees && Object.keys(trees).length > 0) {
       this.addTrees(trees, centerX, centerY, metersToLat, metersToLng);
+    }
+    
+    // Add facilities to map (WS-1.3)
+    if (facilities && Object.keys(facilities).length > 0) {
+      this.addFacilities(facilities, centerX, centerY, metersToLat, metersToLng);
     }
     
     // Fit map to show all data
@@ -414,6 +425,160 @@ class MapService {
   }
 
   /**
+   * Add facilities to the map with distinct styling (WS-1.3)
+   * @param {Object} facilities - Facility data from backend
+   * @param {number} centerX - Map center X coordinate  
+   * @param {number} centerY - Map center Y coordinate
+   * @param {number} metersToLat - Conversion factor for latitude
+   * @param {number} metersToLng - Conversion factor for longitude
+   */
+  addFacilities(facilities, centerX, centerY, metersToLat, metersToLng) {
+    Object.entries(facilities).forEach(([facilityId, facility]) => {
+      // Convert facility coordinates to lat/lng
+      const lat = (facility.y - centerY) * metersToLat;
+      const lng = (facility.x - centerX) * metersToLng;
+
+      // Create facility marker based on type
+      const facilityMarker = this._createFacilityIcon([lat, lng], facility);
+
+      // Create detailed popup
+      facilityMarker.bindPopup(`
+        <div style="font-family: monospace; min-width: 200px;">
+          <strong>${this._getFacilityEmoji(facility.facility_type)} ${facility.name || '未命名設施'}</strong><br/>
+          <hr style="margin: 8px 0;">
+          <strong>類型 Type:</strong> ${this._getFacilityTypeName(facility.facility_type)}<br/>
+          <strong>位置 Position:</strong> (${facility.x.toFixed(1)}, ${facility.y.toFixed(1)})<br/>
+          <strong>所在節點 Node:</strong> ${facility.node_id.substring(0, 8)}...<br/>
+          ${facility.capacity ? `<strong>容量 Capacity:</strong> ${facility.capacity} 人<br/>` : ''}
+          <hr style="margin: 8px 0;">
+          <small style="color: #666;">
+            ${this._getFacilityDescription(facility.facility_type)}
+          </small>
+        </div>
+      `);
+
+      // Add to appropriate layers
+      this.layers.facilities.addLayer(facilityMarker);
+      
+      // Add to type-specific layers for filtering
+      if (facility.facility_type === 'ambulance_station') {
+        this.layers.ambulanceStations.addLayer(facilityMarker);
+      } else if (facility.facility_type === 'shelter') {
+        this.layers.shelters.addLayer(facilityMarker);
+      }
+    });
+  }
+
+  /**
+   * Create facility icon based on type
+   * @param {Array} position - [lat, lng] position for facility
+   * @param {Object} facility - Facility data object
+   * @returns {Object} - Leaflet marker with facility icon
+   */
+  _createFacilityIcon(position, facility) {
+    const isAmbulance = facility.facility_type === 'ambulance_station';
+    
+    // Define facility colors and styles
+    const facilityStyles = {
+      ambulance_station: {
+        backgroundColor: '#dc2626', // Red
+        borderColor: '#7f1d1d',
+        icon: '🚑',
+        size: 24
+      },
+      shelter: {
+        backgroundColor: '#059669', // Green  
+        borderColor: '#064e3b',
+        icon: '🏠',
+        size: 22
+      }
+    };
+
+    const style = facilityStyles[facility.facility_type] || facilityStyles.shelter;
+
+    const facilityIcon = L.divIcon({
+      html: `
+        <div style="
+          width: ${style.size}px;
+          height: ${style.size}px;
+          background-color: ${style.backgroundColor};
+          border: 2px solid ${style.borderColor};
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: ${style.size * 0.6}px;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          position: relative;
+        ">
+          ${style.icon}
+          ${facility.capacity ? `
+            <div style="
+              position: absolute;
+              top: -8px;
+              right: -8px;
+              background-color: white;
+              color: ${style.backgroundColor};
+              border: 1px solid ${style.borderColor};
+              border-radius: 10px;
+              padding: 1px 4px;
+              font-size: 10px;
+              font-weight: bold;
+              min-width: 16px;
+              text-align: center;
+            ">${facility.capacity}</div>
+          ` : ''}
+        </div>
+      `,
+      className: 'facility-icon',
+      iconSize: [style.size, style.size],
+      iconAnchor: [style.size/2, style.size/2],
+      popupAnchor: [0, -style.size/2]
+    });
+
+    return L.marker(position, { icon: facilityIcon });
+  }
+
+  /**
+   * Get facility emoji based on type
+   * @param {string} facilityType - Type of facility
+   * @returns {string} - Emoji representing the facility
+   */
+  _getFacilityEmoji(facilityType) {
+    const emojis = {
+      'ambulance_station': '🚑',
+      'shelter': '🏠'
+    };
+    return emojis[facilityType] || '🏢';
+  }
+
+  /**
+   * Get facility type display name
+   * @param {string} facilityType - Type of facility
+   * @returns {string} - Display name for the facility type
+   */
+  _getFacilityTypeName(facilityType) {
+    const names = {
+      'ambulance_station': '救護車起點 Ambulance Station',
+      'shelter': '避難所 Shelter'
+    };
+    return names[facilityType] || '未知設施 Unknown Facility';
+  }
+
+  /**
+   * Get facility description
+   * @param {string} facilityType - Type of facility  
+   * @returns {string} - Description of the facility
+   */
+  _getFacilityDescription(facilityType) {
+    const descriptions = {
+      'ambulance_station': '🚨 緊急救護服務據點',
+      'shelter': '⛑️ 災害避難收容場所'
+    };
+    return descriptions[facilityType] || '城市基礎設施';
+  }
+
+  /**
    * Fit map view to show generated data
    * @param {Object} boundary - Map boundary data
    * @param {number} metersToLat - Conversion factor
@@ -539,7 +704,7 @@ class MapService {
   getMapStats() {
     if (!this.currentMapData) return null;
 
-    const { nodes, edges, trees = {} } = this.currentMapData;
+    const { nodes, edges, trees = {}, facilities = {} } = this.currentMapData;
     const mainRoads = Object.values(edges).filter(edge => edge.road_type === 'main');
     const secondaryRoads = Object.values(edges).filter(edge => edge.road_type === 'secondary');
 
@@ -549,14 +714,27 @@ class MapService {
       treesByLevel[tree.vulnerability_level] = (treesByLevel[tree.vulnerability_level] || 0) + 1;
     });
 
+    // Facility statistics by type
+    const facilitiesByType = { ambulance_station: 0, shelter: 0 };
+    let totalCapacity = 0;
+    Object.values(facilities).forEach(facility => {
+      facilitiesByType[facility.facility_type] = (facilitiesByType[facility.facility_type] || 0) + 1;
+      if (facility.capacity) {
+        totalCapacity += facility.capacity;
+      }
+    });
+
     return {
       totalNodes: Object.keys(nodes).length,
       totalEdges: Object.keys(edges).length,
       totalTrees: Object.keys(trees).length,
+      totalFacilities: Object.keys(facilities).length,
       mainRoads: mainRoads.length,
       secondaryRoads: secondaryRoads.length,
       averageRoadWidth: Object.values(edges).reduce((sum, edge) => sum + edge.width, 0) / Object.keys(edges).length,
-      treesByVulnerability: treesByLevel
+      treesByVulnerability: treesByLevel,
+      facilitiesByType: facilitiesByType,
+      totalShelterCapacity: totalCapacity
     };
   }
 
@@ -577,7 +755,10 @@ class MapService {
       trees: null,
       treesLevelI: null,
       treesLevelII: null,
-      treesLevelIII: null
+      treesLevelIII: null,
+      facilities: null,
+      ambulanceStations: null,
+      shelters: null
     };
   }
 }

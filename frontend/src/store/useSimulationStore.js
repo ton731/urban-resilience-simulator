@@ -26,7 +26,12 @@ const useSimulationStore = create((set, get) => ({
       I: 0.1,
       II: 0.3,
       III: 0.6
-    }
+    },
+    // Facility generation parameters (WS-1.3)
+    include_facilities: true,
+    ambulance_stations: 3,
+    shelters: 8,
+    shelter_capacity_range: [100, 1000]
   },
   defaultConfig: null,
   
@@ -46,7 +51,10 @@ const useSimulationStore = create((set, get) => ({
       I: true,   // High risk trees
       II: true,  // Medium risk trees
       III: true  // Low risk trees
-    }
+    },
+    facilities: true,
+    ambulanceStations: true,
+    shelters: true
   },
   
   // Statistics
@@ -99,11 +107,13 @@ const useSimulationStore = create((set, get) => ({
         totalNodes: mapData.node_count,
         totalEdges: mapData.edge_count,
         totalTrees: mapData.tree_count || 0,
+        totalFacilities: mapData.facility_count || 0,
         mainRoads: mapData.main_road_count,
         secondaryRoads: mapData.secondary_road_count,
         mapSize: `${mapData.boundary.width}m × ${mapData.boundary.height}m`,
         generationId: mapData.generation_id,
-        treeStats: mapData.tree_stats || null
+        treeStats: mapData.tree_stats || null,
+        facilityStats: mapData.facility_stats || null
       };
 
       set({ 
@@ -175,7 +185,10 @@ const useSimulationStore = create((set, get) => ({
         I: true,
         II: true,
         III: true
-      }
+      },
+      facilities: true,
+      ambulanceStations: true,
+      shelters: true
     }
   }),
 
@@ -206,7 +219,10 @@ const useSimulationStore = create((set, get) => ({
       'Secondary Road Density': `${(generationConfig.secondary_road_density * 100).toFixed(0)}%`,
       'Trees Enabled': generationConfig.include_trees ? 'Yes' : 'No',
       'Tree Spacing': `${generationConfig.tree_spacing}m`,
-      'Tree Max Offset': `${generationConfig.tree_max_offset}m`
+      'Tree Max Offset': `${generationConfig.tree_max_offset}m`,
+      'Facilities Enabled': generationConfig.include_facilities ? 'Yes' : 'No',
+      'Ambulance Stations': generationConfig.ambulance_stations,
+      'Shelters': generationConfig.shelters
     };
   },
 
@@ -232,6 +248,28 @@ const useSimulationStore = create((set, get) => ({
     generationConfig: {
       ...state.generationConfig,
       vulnerability_distribution: distribution
+    }
+  })),
+
+  /**
+   * Toggle facility visibility
+   * @param {string} facilityType - Facility type (ambulanceStations, shelters)  
+   */
+  toggleFacilityType: (facilityType) => set((state) => ({
+    layerVisibility: {
+      ...state.layerVisibility,
+      [facilityType]: !state.layerVisibility[facilityType]
+    }
+  })),
+
+  /**
+   * Update facility configuration
+   * @param {Object} facilityConfig - New facility configuration
+   */
+  updateFacilityConfig: (facilityConfig) => set((state) => ({
+    generationConfig: {
+      ...state.generationConfig,
+      ...facilityConfig
     }
   }))
 }));

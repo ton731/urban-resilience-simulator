@@ -325,6 +325,52 @@ const ControlPanel = () => {
                 </div>
               </>
             )}
+
+            {/* Facility Layers */}
+            {mapStats && mapStats.totalFacilities > 0 && (
+              <div className="border-t border-gray-200 pt-3 mt-3">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={layerVisibility.facilities}
+                    onChange={() => toggleLayer('facilities')}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="ml-2 text-sm text-gray-700 font-medium">
+                    🏢 設施 (Facilities) - {mapStats.totalFacilities}
+                  </span>
+                </label>
+                
+                {/* Facility types */}
+                <div className="ml-4 space-y-2 mt-2">
+                  <label className="flex items-center text-xs">
+                    <input
+                      type="checkbox"
+                      checked={layerVisibility.ambulanceStations}
+                      onChange={() => toggleLayer('ambulanceStations')}
+                      className="rounded border-gray-300 text-red-600 focus:ring-red-500"
+                    />
+                    <div className="ml-2 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center text-white text-xs">🚑</div>
+                    <span className="ml-1 text-red-700">
+                      救護車起點: {mapStats.facilityStats?.ambulance_stations || 0}
+                    </span>
+                  </label>
+                  
+                  <label className="flex items-center text-xs">
+                    <input
+                      type="checkbox"
+                      checked={layerVisibility.shelters}
+                      onChange={() => toggleLayer('shelters')}
+                      className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                    />
+                    <div className="ml-2 w-4 h-4 bg-green-600 rounded-full flex items-center justify-center text-white text-xs">🏠</div>
+                    <span className="ml-1 text-green-700">
+                      避難所: {mapStats.facilityStats?.shelters || 0} (容量: {mapStats.facilityStats?.total_shelter_capacity || 0})
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
         </Card>
 

@@ -85,6 +85,7 @@ class GeneratedMap:
     nodes: Dict[str, MapNode] = field(default_factory=dict)
     edges: Dict[str, RoadEdge] = field(default_factory=dict)
     trees: Dict[str, Any] = field(default_factory=dict)  # Will contain Tree objects
+    facilities: Dict[str, Any] = field(default_factory=dict)  # Will contain Facility objects
     graph: nx.Graph = field(default_factory=nx.Graph)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -93,9 +94,11 @@ class GeneratedMap:
             "nodes": {node_id: node.to_dict() for node_id, node in self.nodes.items()},
             "edges": {edge_id: edge.to_dict() for edge_id, edge in self.edges.items()},
             "trees": {tree_id: tree.to_dict() for tree_id, tree in self.trees.items()},
+            "facilities": {facility_id: facility.to_dict() for facility_id, facility in self.facilities.items()},
             "node_count": len(self.nodes),
             "edge_count": len(self.edges),
-            "tree_count": len(self.trees)
+            "tree_count": len(self.trees),
+            "facility_count": len(self.facilities)
         }
 
 
@@ -121,15 +124,20 @@ class MapGenerator:
         self.main_road_lanes = 4
         self.secondary_road_lanes = 2
         
-    def generate_map(self, include_trees: bool = True) -> GeneratedMap:
+        # Facility specifications (WS-1.3)
+        self.ambulance_stations = config.get("ambulance_stations", 3)
+        self.shelters = config.get("shelters", 8)
+        
+    def generate_map(self, include_trees: bool = True, include_facilities: bool = True) -> GeneratedMap:
         """
-        Main method to generate a complete map with road network and trees.
+        Main method to generate a complete map with road network, trees, and facilities.
         
         Args:
             include_trees: Whether to generate trees (WS-1.2)
+            include_facilities: Whether to generate facilities (WS-1.3)
         
         Returns:
-            GeneratedMap: Complete map data with boundaries, nodes, edges, trees, and graph
+            GeneratedMap: Complete map data with boundaries, nodes, edges, trees, facilities, and graph
         """
         # Create map boundary
         boundary = MapBoundary(
@@ -150,6 +158,10 @@ class MapGenerator:
         # Generate trees along roads (WS-1.2)
         if include_trees:
             self._generate_trees(generated_map)
+        
+        # Generate facilities on road nodes (WS-1.3)
+        if include_facilities:
+            self._generate_facilities(generated_map)
         
         return generated_map
     
@@ -411,3 +423,18 @@ class MapGenerator:
         
         # Add trees to map data
         map_data.trees = trees
+    
+    def _generate_facilities(self, map_data: GeneratedMap) -> None:
+        """
+        Generate facilities on road network nodes (WS-1.3).
+        """
+        from .facility_generator import FacilityGenerator
+        
+        # Create facility generator with configuration
+        facility_generator = FacilityGenerator(self.config)
+        
+        # Generate facilities for the map
+        facilities = facility_generator.generate_facilities_for_map(map_data)
+        
+        # Add facilities to map data
+        map_data.facilities = facilities

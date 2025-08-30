@@ -43,8 +43,19 @@ class TreeResponse(BaseModel):
     trunk_width: float = Field(description="Tree trunk width in meters")
 
 
+class FacilityResponse(BaseModel):
+    """Facility object information (WS-1.3)"""
+    id: str
+    x: float
+    y: float
+    facility_type: str = Field(description="Facility type: ambulance_station, shelter")
+    node_id: str = Field(description="ID of the road network node where facility is located")
+    capacity: Optional[int] = Field(default=None, description="Capacity for shelters")
+    name: Optional[str] = Field(default=None, description="Facility name")
+
+
 class WorldGenerationResponse(BaseModel):
-    """Response schema for world generation API (WS-1.1 + WS-1.2)"""
+    """Response schema for world generation API (WS-1.1 + WS-1.2 + WS-1.3)"""
     
     # Generation metadata
     generation_id: str = Field(description="Unique identifier for this world generation")
@@ -55,16 +66,21 @@ class WorldGenerationResponse(BaseModel):
     nodes: Dict[str, MapNodeResponse] = Field(description="Road network nodes indexed by ID")
     edges: Dict[str, RoadEdgeResponse] = Field(description="Road network edges indexed by ID")
     trees: Dict[str, TreeResponse] = Field(description="Trees indexed by ID (WS-1.2)")
+    facilities: Dict[str, FacilityResponse] = Field(description="Facilities indexed by ID (WS-1.3)")
     
     # Summary statistics  
     node_count: int = Field(description="Total number of nodes in the road network")
     edge_count: int = Field(description="Total number of road segments")
     tree_count: int = Field(description="Total number of trees")
+    facility_count: int = Field(description="Total number of facilities")
     main_road_count: int = Field(description="Number of main roads")
     secondary_road_count: int = Field(description="Number of secondary roads")
     
     # Tree statistics (WS-1.2)
     tree_stats: Optional[Dict[str, Any]] = Field(description="Tree generation statistics")
+    
+    # Facility statistics (WS-1.3)
+    facility_stats: Optional[Dict[str, Any]] = Field(description="Facility generation statistics")
     
     # Generation parameters used
     generation_config: Dict[str, Any] = Field(description="Configuration parameters used for generation")

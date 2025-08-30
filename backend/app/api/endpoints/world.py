@@ -10,6 +10,7 @@ from app.schemas.response import (
     MapNodeResponse, 
     RoadEdgeResponse,
     TreeResponse,
+    FacilityResponse,
     ErrorResponse
 )
 from app.core.world_synthesizer.map_generator import MapGenerator
@@ -24,19 +25,20 @@ router = APIRouter()
         400: {"model": ErrorResponse, "description": "Invalid request parameters"},
         500: {"model": ErrorResponse, "description": "Internal server error"}
     },
-    summary="Generate World Map (WS-1.1 + WS-1.2)",
+    summary="Generate World Map (WS-1.1 + WS-1.2 + WS-1.3)",
     description="""
-    Generates a procedural 2D map with road network and trees according to WS-1.1 + WS-1.2 specifications.
+    Generates a procedural 2D map with road network, trees, and facilities according to WS-1.1 + WS-1.2 + WS-1.3 specifications.
     
     Creates:
     - 2D grid map with geographical boundaries
     - Random but logical road networks (main roads and secondary roads)
     - Trees along road edges with vulnerability levels (WS-1.2)
+    - Critical facilities on road network nodes (WS-1.3): ambulance stations and shelters
     - Graph data structure with nodes and edges
     - Configurable generation parameters
     
-    The generated map includes intersections, road segments, and trees with properties
-    suitable for disaster simulation.
+    The generated map includes intersections, road segments, trees, and facilities with properties
+    suitable for disaster simulation and emergency response analysis.
     """
 )
 async def generate_world(request: WorldGenerationRequest):
@@ -93,7 +95,10 @@ async def generate_world(request: WorldGenerationRequest):
         
         # Initialize map generator and generate map
         generator = MapGenerator(config)
-        generated_map = generator.generate_map(include_trees=request.include_trees)
+        generated_map = generator.generate_map(
+            include_trees=request.include_trees,
+            include_facilities=request.include_facilities if hasattr(request, 'include_facilities') else True
+        )
         
         # Convert to response format
         generation_id = f"gen_{uuid.uuid4().hex[:12]}"
@@ -111,6 +116,12 @@ async def generate_world(request: WorldGenerationRequest):
             for edge_id, edge in generated_map.edges.items()
         }
         
+        # Build facilities response (WS-1.3)
+        facilities_response = {
+            facility_id: FacilityResponse(**facility.to_dict())
+            for facility_id, facility in generated_map.facilities.items()
+        }
+        
         # Build trees response (WS-1.2)
         trees_response = {}
         tree_stats = None
@@ -125,6 +136,13 @@ async def generate_world(request: WorldGenerationRequest):
             tree_generator = TreeGenerator(config)
             tree_stats = tree_generator.get_generation_stats(generated_map.trees)
         
+        # Calculate facility statistics (WS-1.3)
+        facility_stats = None
+        if generated_map.facilities:
+            from app.core.world_synthesizer.facility_generator import FacilityGenerator
+            facility_generator = FacilityGenerator(config)
+            facility_stats = facility_generator.get_generation_stats(generated_map.facilities)
+        
         # Calculate road type counts
         main_road_count = sum(1 for edge in generated_map.edges.values() 
                              if edge.road_type == "main")
@@ -138,12 +156,15 @@ async def generate_world(request: WorldGenerationRequest):
             nodes=nodes_response,
             edges=edges_response,
             trees=trees_response,
+            facilities=facilities_response,
             node_count=len(generated_map.nodes),
             edge_count=len(generated_map.edges),
             tree_count=len(generated_map.trees),
+            facility_count=len(generated_map.facilities),
             main_road_count=main_road_count,
             secondary_road_count=secondary_road_count,
             tree_stats=tree_stats,
+            facility_stats=facility_stats,
             generation_config=config
         )
         
@@ -198,5 +219,10 @@ async def get_default_config():
             "I": 0.1,
             "II": 0.3,
             "III": 0.6
-        }
+        },
+        # Facility generation defaults (WS-1.3)
+        "include_facilities": True,
+        "ambulance_stations": 3,
+        "shelters": 8,
+        "shelter_capacity_range": [100, 1000]
     }

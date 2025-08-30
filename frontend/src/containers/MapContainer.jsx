@@ -136,6 +136,38 @@ const MapContainer = () => {
               <div className="w-3 h-3 bg-orange-400 rounded-full"></div>
               <span>交叉路口 Intersections</span>
             </div>
+            {mapData && mapData.facility_count > 0 && (
+              <>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '20px',
+                    height: '20px', 
+                    backgroundColor: '#dc2626',
+                    border: '2px solid #7f1d1d',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '12px'
+                  }}>🚑</div>
+                  <span>救護車起點 Ambulance Stations</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '20px',
+                    height: '20px',
+                    backgroundColor: '#059669', 
+                    border: '2px solid #064e3b',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '12px'
+                  }}>🏠</div>
+                  <span>避難所 Shelters</span>
+                </div>
+              </>
+            )}
             {mapData && mapData.tree_count > 0 && (
               <>
                 <div className="flex items-center space-x-2">

@@ -88,3 +88,4 @@ When implementing this project, follow the technical architecture specified in `
 - Backend is already deployed on http://0.0.0.0:8000 . If you need to test it, don't deploy it yourself, use this deployed endpoint
 - Don't run python scripts by your own.
 - Don't pip install python packages by your own, please ask me to do it, since I need to activate conda env and you will run into some problem if you do it yourself.
+- Don't need to write test scripts for both backend and frontend
