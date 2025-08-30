@@ -281,12 +281,15 @@ class MapGenerator:
                 # Connect consecutive nodes with road edges
                 for i in range(len(nodes_on_road) - 1):
                     edge_id = str(uuid.uuid4())
+                    # Some secondary roads are one-way (30% chance)
+                    is_bidirectional = random.random() > 0.3
                     road_edge = RoadEdge(
                         id=edge_id,
                         from_node=nodes_on_road[i],
                         to_node=nodes_on_road[i + 1],
                         width=self.secondary_road_width,
                         lanes=self.secondary_road_lanes,
+                        is_bidirectional=is_bidirectional,
                         road_type="secondary",
                         speed_limit=40.0
                     )
@@ -326,12 +329,15 @@ class MapGenerator:
                 # Connect consecutive nodes
                 for i in range(len(nodes_on_road) - 1):
                     edge_id = str(uuid.uuid4())
+                    # Some secondary roads are one-way (30% chance)
+                    is_bidirectional = random.random() > 0.3
                     road_edge = RoadEdge(
                         id=edge_id,
                         from_node=nodes_on_road[i],
                         to_node=nodes_on_road[i + 1],
                         width=self.secondary_road_width,
                         lanes=self.secondary_road_lanes,
+                        is_bidirectional=is_bidirectional,
                         road_type="secondary",
                         speed_limit=40.0
                     )

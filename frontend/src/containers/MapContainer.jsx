@@ -117,12 +117,20 @@ const MapContainer = () => {
           <h4 className="font-medium mb-2">圖例 Legend</h4>
           <div className="space-y-1">
             <div className="flex items-center space-x-2">
-              <div className="w-4 h-1 bg-red-500"></div>
-              <span>主幹道 Main Roads</span>
+              <div className="w-6 h-3 bg-red-400 border border-red-800"></div>
+              <span>主幹道 Main Roads (雙向)</span>
             </div>
             <div className="flex items-center space-x-2">
-              <div className="w-4 h-1 bg-blue-500" style={{ borderTop: '2px dashed' }}></div>
-              <span>次要道路 Secondary Roads</span>
+              <div className="w-6 h-3 bg-red-300 border border-red-800" style={{ opacity: 0.7, borderStyle: 'dashed' }}></div>
+              <span>主幹道 Main Roads (單向)</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <div className="w-6 h-3 bg-blue-400 border border-blue-800"></div>
+              <span>次要道路 Secondary Roads (雙向)</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <div className="w-6 h-3 bg-blue-300 border border-blue-800" style={{ opacity: 0.7, borderStyle: 'dashed' }}></div>
+              <span>次要道路 Secondary Roads (單向)</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-3 h-3 bg-orange-400 rounded-full"></div>
@@ -131,15 +139,63 @@ const MapContainer = () => {
             {mapData && mapData.tree_count > 0 && (
               <>
                 <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                  <div style={{ 
+                    width: '12px', 
+                    height: '12px', 
+                    background: '#cc6600',
+                    borderRadius: '50% 50% 50% 50% / 60% 60% 40% 40%',
+                    position: 'relative'
+                  }}>
+                    <div style={{
+                      position: 'absolute',
+                      bottom: '-2px',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      width: '2px',
+                      height: '4px',
+                      background: '#8b4513'
+                    }}></div>
+                  </div>
                   <span>樹木-高風險 Trees Level I</span>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
+                  <div style={{ 
+                    width: '12px', 
+                    height: '12px', 
+                    background: '#ff8c00',
+                    borderRadius: '50% 50% 50% 50% / 60% 60% 40% 40%',
+                    position: 'relative'
+                  }}>
+                    <div style={{
+                      position: 'absolute',
+                      bottom: '-2px',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      width: '2px',
+                      height: '4px',
+                      background: '#654321'
+                    }}></div>
+                  </div>
                   <span>樹木-中風險 Trees Level II</span>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  <div style={{ 
+                    width: '12px', 
+                    height: '12px', 
+                    background: '#228B22',
+                    borderRadius: '50% 50% 50% 50% / 60% 60% 40% 40%',
+                    position: 'relative'
+                  }}>
+                    <div style={{
+                      position: 'absolute',
+                      bottom: '-2px',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      width: '2px',
+                      height: '4px',
+                      background: '#8b4513'
+                    }}></div>
+                  </div>
                   <span>樹木-低風險 Trees Level III</span>
                 </div>
               </>

@@ -147,7 +147,7 @@ class MapService {
   }
 
   /**
-   * Add road network edges to the map
+   * Add road network edges to the map with realistic width rendering
    * @param {Object} edges - Edge data
    * @param {Object} nodes - Node data with coordinates
    */
@@ -161,29 +161,57 @@ class MapService {
         return;
       }
 
-      const coordinates = [
-        [fromNode.lat, fromNode.lng],
-        [toNode.lat, toNode.lng]
-      ];
-
       const isMainRoad = edge.road_type === 'main';
+      
+      // Create road polygon with actual width
+      const roadPolygon = this._createRoadPolygon(fromNode, toNode, edge);
+      
+      // Style based on road type and direction
       const roadOptions = {
-        color: isMainRoad ? '#ff0000' : '#0000ff',
-        weight: isMainRoad ? 6 : 3,
-        opacity: 0.8,
-        dashArray: isMainRoad ? null : '5, 5'
+        color: isMainRoad ? '#8b0000' : '#00008b', // Darker borders
+        fillColor: isMainRoad ? '#ff4444' : '#4444ff',
+        fillOpacity: 0.7,
+        weight: 2,
+        opacity: 0.9
       };
 
-      const road = L.polyline(coordinates, roadOptions);
+      // Different styling for one-way roads
+      if (!edge.is_bidirectional) {
+        roadOptions.fillColor = isMainRoad ? '#ff6666' : '#6666ff';
+        roadOptions.fillOpacity = 0.5;
+        // Add arrow pattern for one-way roads
+        roadOptions.dashArray = '10, 5';
+      }
+
+      const road = L.polygon(roadPolygon, roadOptions);
+      
+      // Add direction arrow for one-way roads
+      if (!edge.is_bidirectional) {
+        const arrowLatLng = this._getArrowPosition(fromNode, toNode);
+        const arrow = this._createDirectionArrow(arrowLatLng, this._calculateAngle(fromNode, toNode), isMainRoad);
+        
+        // Add arrow to the same layer
+        if (isMainRoad) {
+          this.layers.mainRoads.addLayer(arrow);
+        } else {
+          this.layers.secondaryRoads.addLayer(arrow);
+        }
+        this.layers.edges.addLayer(arrow);
+      }
       
       road.bindPopup(`
-        <div>
-          <strong>Road: ${edgeId}</strong><br/>
-          Type: ${edge.road_type}<br/>
-          Width: ${edge.width}m<br/>
-          Lanes: ${edge.lanes}<br/>
-          Speed Limit: ${edge.speed_limit} km/h<br/>
-          Bidirectional: ${edge.is_bidirectional ? 'Yes' : 'No'}
+        <div style="font-family: monospace;">
+          <strong>🛣️ 道路 Road ${edgeId.substring(0, 8)}</strong><br/>
+          <hr style="margin: 8px 0;">
+          <strong>類型 Type:</strong> ${edge.road_type === 'main' ? '主幹道 Main' : '次要道路 Secondary'}<br/>
+          <strong>寬度 Width:</strong> ${edge.width}m<br/>
+          <strong>車道 Lanes:</strong> ${edge.lanes}<br/>
+          <strong>速限 Speed Limit:</strong> ${edge.speed_limit} km/h<br/>
+          <strong>方向 Direction:</strong> ${edge.is_bidirectional ? '雙向 Bidirectional' : '單向 One-way'}<br/>
+          <hr style="margin: 8px 0;">
+          <small style="color: #666;">
+            ${edge.is_bidirectional ? '⟷ 雙向通行' : '→ 單向通行'}
+          </small>
         </div>
       `);
 
@@ -196,6 +224,193 @@ class MapService {
       
       this.layers.edges.addLayer(road);
     });
+  }
+
+  /**
+   * Create a road polygon with realistic width
+   * @param {Object} fromNode - Starting node with lat/lng
+   * @param {Object} toNode - Ending node with lat/lng
+   * @param {Object} edge - Road edge data with width info
+   * @returns {Array} - Array of lat/lng points forming the road polygon
+   */
+  _createRoadPolygon(fromNode, toNode, edge) {
+    // Calculate road direction vector
+    const dx = toNode.lng - fromNode.lng;
+    const dy = toNode.lat - fromNode.lat;
+    const roadLength = Math.sqrt(dx * dx + dy * dy);
+    
+    // Convert width from meters to approximate degrees
+    // (This is a rough approximation for visualization)
+    const widthInDegrees = (edge.width / 2) / 111000; // Approximate conversion
+    
+    // Calculate perpendicular offset
+    const offsetX = (-dy / roadLength) * widthInDegrees;
+    const offsetY = (dx / roadLength) * widthInDegrees;
+    
+    // Create road polygon points
+    const roadPolygon = [
+      [fromNode.lat + offsetY, fromNode.lng + offsetX], // Left side start
+      [fromNode.lat - offsetY, fromNode.lng - offsetX], // Right side start
+      [toNode.lat - offsetY, toNode.lng - offsetX],     // Right side end
+      [toNode.lat + offsetY, toNode.lng + offsetX],     // Left side end
+      [fromNode.lat + offsetY, fromNode.lng + offsetX]  // Close polygon
+    ];
+    
+    return roadPolygon;
+  }
+
+  /**
+   * Create direction arrow for one-way roads
+   * @param {Array} position - [lat, lng] position for arrow
+   * @param {number} angle - Angle in degrees for arrow direction
+   * @param {boolean} isMainRoad - Whether this is a main road
+   * @returns {Object} - Leaflet marker with arrow
+   */
+  _createDirectionArrow(position, angle, isMainRoad) {
+    const arrowSize = isMainRoad ? 12 : 8;
+    const arrowColor = isMainRoad ? '#ff0000' : '#0000ff';
+    
+    const arrowIcon = L.divIcon({
+      html: `
+        <div style="
+          width: ${arrowSize}px; 
+          height: ${arrowSize}px; 
+          background-color: ${arrowColor}; 
+          transform: rotate(${angle}deg);
+          clip-path: polygon(0 0, 100% 50%, 0 100%);
+          border: 1px solid white;
+        "></div>
+      `,
+      className: 'direction-arrow',
+      iconSize: [arrowSize, arrowSize],
+      iconAnchor: [arrowSize/2, arrowSize/2]
+    });
+
+    return L.marker(position, { icon: arrowIcon });
+  }
+
+  /**
+   * Get position for direction arrow (middle of road)
+   * @param {Object} fromNode - Starting node
+   * @param {Object} toNode - Ending node
+   * @returns {Array} - [lat, lng] for arrow position
+   */
+  _getArrowPosition(fromNode, toNode) {
+    return [
+      (fromNode.lat + toNode.lat) / 2,
+      (fromNode.lng + toNode.lng) / 2
+    ];
+  }
+
+  /**
+   * Calculate angle between two nodes
+   * @param {Object} fromNode - Starting node
+   * @param {Object} toNode - Ending node
+   * @returns {number} - Angle in degrees
+   */
+  _calculateAngle(fromNode, toNode) {
+    const dx = toNode.lng - fromNode.lng;
+    const dy = toNode.lat - fromNode.lat;
+    return Math.atan2(dy, dx) * (180 / Math.PI);
+  }
+
+  /**
+   * Create realistic tree icon
+   * @param {Array} position - [lat, lng] position for tree
+   * @param {Object} tree - Tree data object
+   * @param {number} size - Size of tree icon
+   * @returns {Object} - Leaflet marker with tree icon
+   */
+  _createTreeIcon(position, tree, size) {
+    // Tree colors based on vulnerability level
+    const treeColors = {
+      'I': {   // High vulnerability - Autumn/damaged colors
+        crown: '#cc6600',
+        trunk: '#8b4513',
+        shadow: '#ffcc99'
+      },
+      'II': {  // Medium vulnerability - Mixed colors
+        crown: '#ff8c00',
+        trunk: '#654321',
+        shadow: '#ffd4aa'
+      },
+      'III': { // Low vulnerability - Healthy green
+        crown: '#228B22',
+        trunk: '#8b4513',
+        shadow: '#90EE90'
+      }
+    };
+
+    const colors = treeColors[tree.vulnerability_level] || treeColors['III'];
+    const trunkWidth = Math.max(2, size * 0.15);
+    const trunkHeight = size * 0.4;
+    const crownSize = size * 0.8;
+
+    const treeIcon = L.divIcon({
+      html: `
+        <div style="position: relative; width: ${size}px; height: ${size}px;">
+          <!-- Tree Shadow -->
+          <div style="
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: ${crownSize * 1.2}px;
+            height: ${crownSize * 0.3}px;
+            background: ${colors.shadow};
+            border-radius: 50%;
+            opacity: 0.3;
+            z-index: 1;
+          "></div>
+          
+          <!-- Tree Trunk -->
+          <div style="
+            position: absolute;
+            bottom: ${crownSize * 0.15}px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: ${trunkWidth}px;
+            height: ${trunkHeight}px;
+            background: ${colors.trunk};
+            border-radius: 2px;
+            z-index: 2;
+          "></div>
+          
+          <!-- Tree Crown -->
+          <div style="
+            position: absolute;
+            bottom: ${trunkHeight * 0.5}px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: ${crownSize}px;
+            height: ${crownSize}px;
+            background: ${colors.crown};
+            border-radius: 50%;
+            border: 1px solid ${colors.crown}dd;
+            z-index: 3;
+          "></div>
+          
+          <!-- Tree Crown Highlight -->
+          <div style="
+            position: absolute;
+            bottom: ${trunkHeight * 0.5 + crownSize * 0.6}px;
+            left: ${50 + crownSize * 0.15}%;
+            transform: translateX(-50%);
+            width: ${crownSize * 0.3}px;
+            height: ${crownSize * 0.3}px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            z-index: 4;
+          "></div>
+        </div>
+      `,
+      className: 'tree-icon',
+      iconSize: [size, size],
+      iconAnchor: [size/2, size],
+      popupAnchor: [0, -size]
+    });
+
+    return L.marker(position, { icon: treeIcon });
   }
 
   /**
@@ -254,12 +469,9 @@ class MapService {
 
       const style = treeStyles[tree.vulnerability_level] || treeStyles['III'];
 
-      // Create tree marker
-      const treeMarker = L.circleMarker([lat, lng], {
-        ...style,
-        opacity: 1,
-        fillOpacity: 0.8
-      });
+      // Create tree marker with realistic tree symbol
+      const treeSize = Math.max(8, Math.min(20, tree.height * 0.8)); // Size based on height
+      const treeMarker = this._createTreeIcon([lat, lng], tree, treeSize);
 
       // Create detailed popup
       treeMarker.bindPopup(`
