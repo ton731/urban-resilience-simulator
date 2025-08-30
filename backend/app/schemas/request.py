@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Any
 
 
 class WorldGenerationRequest(BaseModel):
-    """Request schema for world generation API (WS-1.1 + WS-1.2)"""
+    """Request schema for world generation API (WS-1.1 + WS-1.2 + WS-1.3 + WS-1.5)"""
     
     # Map configuration
     map_size: List[int] = Field(
@@ -59,6 +59,25 @@ class WorldGenerationRequest(BaseModel):
         description="Tree vulnerability level distribution (I/II/III)"
     )
     
+    # Facility generation configuration (WS-1.3)
+    include_facilities: Optional[bool] = Field(
+        default=True,
+        description="Whether to generate facilities (ambulance stations, shelters)"
+    )
+    
+    # Building generation configuration (WS-1.5)
+    include_buildings: Optional[bool] = Field(
+        default=True,
+        description="Whether to generate buildings and population (WS-1.5)"
+    )
+    
+    building_density: Optional[float] = Field(
+        default=0.3,
+        ge=0.1,
+        le=1.0,
+        description="Building density factor (buildings per 100m²)"
+    )
+    
     # Additional configuration options
     config_override: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -80,6 +99,9 @@ class WorldGenerationRequest(BaseModel):
                     "II": 0.3,
                     "III": 0.6
                 },
+                "include_facilities": True,
+                "include_buildings": True,
+                "building_density": 0.3,
                 "config_override": {
                     "main_road_width": 12.0,
                     "secondary_road_width": 6.0

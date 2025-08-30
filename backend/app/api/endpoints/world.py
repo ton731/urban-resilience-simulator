@@ -11,6 +11,7 @@ from app.schemas.response import (
     RoadEdgeResponse,
     TreeResponse,
     FacilityResponse,
+    BuildingResponse,
     ErrorResponse
 )
 from app.core.world_synthesizer.map_generator import MapGenerator
@@ -25,20 +26,21 @@ router = APIRouter()
         400: {"model": ErrorResponse, "description": "Invalid request parameters"},
         500: {"model": ErrorResponse, "description": "Internal server error"}
     },
-    summary="Generate World Map (WS-1.1 + WS-1.2 + WS-1.3)",
+    summary="Generate World Map (WS-1.1 + WS-1.2 + WS-1.3 + WS-1.5)",
     description="""
-    Generates a procedural 2D map with road network, trees, and facilities according to WS-1.1 + WS-1.2 + WS-1.3 specifications.
+    Generates a procedural 2D map with road network, trees, facilities, and buildings according to WS-1.1 + WS-1.2 + WS-1.3 + WS-1.5 specifications.
     
     Creates:
     - 2D grid map with geographical boundaries
     - Random but logical road networks (main roads and secondary roads)
     - Trees along road edges with vulnerability levels (WS-1.2)
     - Critical facilities on road network nodes (WS-1.3): ambulance stations and shelters
+    - Buildings with population data in non-road areas (WS-1.5): residential, commercial, mixed, industrial
     - Graph data structure with nodes and edges
     - Configurable generation parameters
     
-    The generated map includes intersections, road segments, trees, and facilities with properties
-    suitable for disaster simulation and emergency response analysis.
+    The generated map includes intersections, road segments, trees, facilities, and buildings with properties
+    suitable for disaster simulation and emergency response analysis including population-based evacuation scenarios.
     """
 )
 async def generate_world(request: WorldGenerationRequest):
@@ -67,6 +69,10 @@ async def generate_world(request: WorldGenerationRequest):
             "tree_road_buffer": 3.0,  # From config
             "tree_height_range": [4.0, 25.0],  # From config
             "tree_trunk_width_range": [0.2, 1.5],  # From config
+            # Building generation parameters (WS-1.5)
+            "building_density": getattr(request, 'building_density', 0.3),
+            "min_building_distance": 25.0,
+            "road_buffer_distance": 15.0
         }
         
         # Set vulnerability distribution
@@ -97,7 +103,8 @@ async def generate_world(request: WorldGenerationRequest):
         generator = MapGenerator(config)
         generated_map = generator.generate_map(
             include_trees=request.include_trees,
-            include_facilities=request.include_facilities if hasattr(request, 'include_facilities') else True
+            include_facilities=request.include_facilities if hasattr(request, 'include_facilities') else True,
+            include_buildings=getattr(request, 'include_buildings', True)
         )
         
         # Convert to response format
@@ -122,6 +129,12 @@ async def generate_world(request: WorldGenerationRequest):
             for facility_id, facility in generated_map.facilities.items()
         }
         
+        # Build buildings response (WS-1.5)
+        buildings_response = {
+            building_id: BuildingResponse(**building.to_dict())
+            for building_id, building in generated_map.buildings.items()
+        }
+        
         # Build trees response (WS-1.2)
         trees_response = {}
         tree_stats = None
@@ -143,6 +156,13 @@ async def generate_world(request: WorldGenerationRequest):
             facility_generator = FacilityGenerator(config)
             facility_stats = facility_generator.get_generation_stats(generated_map.facilities)
         
+        # Calculate population statistics (WS-1.5)
+        population_stats = None
+        if generated_map.buildings:
+            from app.core.world_synthesizer.building_generator import BuildingGenerator
+            building_generator = BuildingGenerator(config)
+            population_stats = building_generator.calculate_population_statistics(generated_map.buildings)
+        
         # Calculate road type counts
         main_road_count = sum(1 for edge in generated_map.edges.values() 
                              if edge.road_type == "main")
@@ -157,14 +177,17 @@ async def generate_world(request: WorldGenerationRequest):
             edges=edges_response,
             trees=trees_response,
             facilities=facilities_response,
+            buildings=buildings_response,
             node_count=len(generated_map.nodes),
             edge_count=len(generated_map.edges),
             tree_count=len(generated_map.trees),
             facility_count=len(generated_map.facilities),
+            building_count=len(generated_map.buildings),
             main_road_count=main_road_count,
             secondary_road_count=secondary_road_count,
             tree_stats=tree_stats,
             facility_stats=facility_stats,
+            population_stats=population_stats,
             generation_config=config
         )
         
@@ -224,5 +247,16 @@ async def get_default_config():
         "include_facilities": True,
         "ambulance_stations": 3,
         "shelters": 8,
-        "shelter_capacity_range": [100, 1000]
+        "shelter_capacity_range": [100, 1000],
+        # Building generation defaults (WS-1.5)
+        "include_buildings": True,
+        "building_density": 0.3,
+        "min_building_distance": 25.0,
+        "road_buffer_distance": 15.0,
+        "building_type_weights": {
+            "residential": 0.6,
+            "commercial": 0.2,
+            "mixed": 0.15,
+            "industrial": 0.05
+        }
     }

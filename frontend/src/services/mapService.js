@@ -32,7 +32,12 @@ class MapService {
       treesLevelIII: null,
       facilities: null,
       ambulanceStations: null,
-      shelters: null
+      shelters: null,
+      buildings: null,
+      buildingsResidential: null,
+      buildingsCommercial: null,
+      buildingsMixed: null,
+      buildingsIndustrial: null
     };
     this.currentMapData = null;
   }
@@ -81,6 +86,11 @@ class MapService {
     this.layers.facilities = L.layerGroup().addTo(this.map);
     this.layers.ambulanceStations = L.layerGroup().addTo(this.map);
     this.layers.shelters = L.layerGroup().addTo(this.map);
+    this.layers.buildings = L.layerGroup().addTo(this.map);
+    this.layers.buildingsResidential = L.layerGroup().addTo(this.map);
+    this.layers.buildingsCommercial = L.layerGroup().addTo(this.map);
+    this.layers.buildingsMixed = L.layerGroup().addTo(this.map);
+    this.layers.buildingsIndustrial = L.layerGroup().addTo(this.map);
 
     return this.map;
   }
@@ -100,7 +110,7 @@ class MapService {
     
     // Convert backend coordinates to Leaflet LatLng
     // Backend uses meters, we need to convert to lat/lng for display
-    const { boundary, nodes, edges, trees = {}, facilities = {} } = mapData;
+    const { boundary, nodes, edges, trees = {}, facilities = {}, buildings = {} } = mapData;
     
     // Calculate center and bounds
     const centerX = (boundary.min_x + boundary.max_x) / 2;
@@ -132,6 +142,11 @@ class MapService {
     // Add facilities to map (WS-1.3)
     if (facilities && Object.keys(facilities).length > 0) {
       this.addFacilities(facilities, centerX, centerY, metersToLat, metersToLng);
+    }
+    
+    // Add buildings to map (WS-1.5)
+    if (buildings && Object.keys(buildings).length > 0) {
+      this.addBuildings(buildings, centerX, centerY, metersToLat, metersToLng);
     }
     
     // Fit map to show all data
@@ -587,6 +602,193 @@ class MapService {
   }
 
   /**
+   * Add buildings to the map with type-based styling (WS-1.5)
+   * @param {Object} buildings - Building data from backend
+   * @param {number} centerX - Map center X coordinate  
+   * @param {number} centerY - Map center Y coordinate
+   * @param {number} metersToLat - Conversion factor for latitude
+   * @param {number} metersToLng - Conversion factor for longitude
+   */
+  addBuildings(buildings, centerX, centerY, metersToLat, metersToLng) {
+    Object.entries(buildings).forEach(([buildingId, building]) => {
+      // Convert building coordinates to lat/lng
+      const lat = (building.y - centerY) * metersToLat;
+      const lng = (building.x - centerX) * metersToLng;
+
+      // Create building marker based on type
+      const buildingMarker = this._createBuildingIcon([lat, lng], building);
+
+      // Create detailed popup
+      buildingMarker.bindPopup(`
+        <div style="font-family: monospace; min-width: 240px;">
+          <strong>${this._getBuildingEmoji(building.building_type)} ${this._getBuildingTypeName(building.building_type)}</strong><br/>
+          <hr style="margin: 8px 0;">
+          <strong>位置 Position:</strong> (${building.x.toFixed(1)}, ${building.y.toFixed(1)})<br/>
+          <strong>樓高 Height:</strong> ${building.height.toFixed(1)}m<br/>
+          <strong>樓層 Floors:</strong> ${building.floors}<br/>
+          <strong>佔地面積 Footprint:</strong> ${building.footprint_area.toFixed(0)}m²<br/>
+          <strong>人口 Population:</strong> ${building.population} 人<br/>
+          <strong>容量 Capacity:</strong> ${building.capacity} 人<br/>
+          <strong>使用率 Occupancy:</strong> ${((building.population / building.capacity) * 100).toFixed(1)}%<br/>
+          <hr style="margin: 8px 0;">
+          <small style="color: #666;">
+            ${this._getBuildingDescription(building.building_type)}
+          </small>
+        </div>
+      `);
+
+      // Add to appropriate layers
+      this.layers.buildings.addLayer(buildingMarker);
+      
+      // Add to type-specific layers for filtering
+      switch(building.building_type) {
+        case 'residential':
+          this.layers.buildingsResidential.addLayer(buildingMarker);
+          break;
+        case 'commercial':
+          this.layers.buildingsCommercial.addLayer(buildingMarker);
+          break;
+        case 'mixed':
+          this.layers.buildingsMixed.addLayer(buildingMarker);
+          break;
+        case 'industrial':
+          this.layers.buildingsIndustrial.addLayer(buildingMarker);
+          break;
+      }
+    });
+  }
+
+  /**
+   * Create building icon based on type
+   * @param {Array} position - [lat, lng] position for building
+   * @param {Object} building - Building data object
+   * @returns {Object} - Leaflet marker with building icon
+   */
+  _createBuildingIcon(position, building) {
+    // Define building colors and styles by type
+    const buildingStyles = {
+      residential: {
+        backgroundColor: '#3b82f6', // Blue
+        borderColor: '#1e40af',
+        icon: '🏘️',
+        size: 16
+      },
+      commercial: {
+        backgroundColor: '#f59e0b', // Amber
+        borderColor: '#d97706',
+        icon: '🏢',
+        size: 18
+      },
+      mixed: {
+        backgroundColor: '#8b5cf6', // Purple
+        borderColor: '#7c3aed',
+        icon: '🏬',
+        size: 17
+      },
+      industrial: {
+        backgroundColor: '#6b7280', // Gray
+        borderColor: '#4b5563',
+        icon: '🏭',
+        size: 19
+      }
+    };
+
+    const style = buildingStyles[building.building_type] || buildingStyles.residential;
+    
+    // Scale size based on building height (taller buildings are larger icons)
+    const heightFactor = Math.min(2.0, Math.max(0.8, building.height / 20)); // Scale between 0.8x and 2x
+    const adjustedSize = Math.round(style.size * heightFactor);
+
+    const buildingIcon = L.divIcon({
+      html: `
+        <div style="
+          width: ${adjustedSize}px;
+          height: ${adjustedSize}px;
+          background-color: ${style.backgroundColor};
+          border: 2px solid ${style.borderColor};
+          border-radius: 3px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: ${adjustedSize * 0.6}px;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          position: relative;
+        ">
+          ${style.icon}
+          ${building.population > 0 ? `
+            <div style="
+              position: absolute;
+              top: -8px;
+              right: -8px;
+              background-color: white;
+              color: ${style.backgroundColor};
+              border: 1px solid ${style.borderColor};
+              border-radius: 8px;
+              padding: 1px 4px;
+              font-size: 9px;
+              font-weight: bold;
+              min-width: 14px;
+              text-align: center;
+              line-height: 1;
+            ">${building.population > 99 ? '99+' : building.population}</div>
+          ` : ''}
+        </div>
+      `,
+      className: 'building-icon',
+      iconSize: [adjustedSize, adjustedSize],
+      iconAnchor: [adjustedSize/2, adjustedSize/2],
+      popupAnchor: [0, -adjustedSize/2]
+    });
+
+    return L.marker(position, { icon: buildingIcon });
+  }
+
+  /**
+   * Get building emoji based on type
+   * @param {string} buildingType - Type of building
+   * @returns {string} - Emoji representing the building
+   */
+  _getBuildingEmoji(buildingType) {
+    const emojis = {
+      'residential': '🏘️',
+      'commercial': '🏢',
+      'mixed': '🏬',
+      'industrial': '🏭'
+    };
+    return emojis[buildingType] || '🏢';
+  }
+
+  /**
+   * Get building type display name
+   * @param {string} buildingType - Type of building
+   * @returns {string} - Display name for the building type
+   */
+  _getBuildingTypeName(buildingType) {
+    const names = {
+      'residential': '住宅建築 Residential',
+      'commercial': '商業建築 Commercial',
+      'mixed': '混合建築 Mixed Use',
+      'industrial': '工業建築 Industrial'
+    };
+    return names[buildingType] || '建築物 Building';
+  }
+
+  /**
+   * Get building description
+   * @param {string} buildingType - Type of building  
+   * @returns {string} - Description of the building
+   */
+  _getBuildingDescription(buildingType) {
+    const descriptions = {
+      'residential': '🏠 主要用於居住的建築物',
+      'commercial': '🛒 商業活動與辦公用途',
+      'mixed': '🏘️ 商住混合使用建築',
+      'industrial': '⚙️ 工業生產與製造設施'
+    };
+    return descriptions[buildingType] || '城市建築設施';
+  }
+
+  /**
    * Fit map view to show generated data
    * @param {Object} boundary - Map boundary data
    * @param {number} metersToLat - Conversion factor
@@ -712,7 +914,7 @@ class MapService {
   getMapStats() {
     if (!this.currentMapData) return null;
 
-    const { nodes, edges, trees = {}, facilities = {} } = this.currentMapData;
+    const { nodes, edges, trees = {}, facilities = {}, buildings = {} } = this.currentMapData;
     const mainRoads = Object.values(edges).filter(edge => edge.road_type === 'main');
     const secondaryRoads = Object.values(edges).filter(edge => edge.road_type === 'secondary');
 
@@ -732,17 +934,32 @@ class MapService {
       }
     });
 
+    // Building statistics by type
+    const buildingsByType = { residential: 0, commercial: 0, mixed: 0, industrial: 0 };
+    let totalPopulation = 0;
+    let totalBuildingCapacity = 0;
+    Object.values(buildings).forEach(building => {
+      buildingsByType[building.building_type] = (buildingsByType[building.building_type] || 0) + 1;
+      totalPopulation += building.population || 0;
+      totalBuildingCapacity += building.capacity || 0;
+    });
+
     return {
       totalNodes: Object.keys(nodes).length,
       totalEdges: Object.keys(edges).length,
       totalTrees: Object.keys(trees).length,
       totalFacilities: Object.keys(facilities).length,
+      totalBuildings: Object.keys(buildings).length,
       mainRoads: mainRoads.length,
       secondaryRoads: secondaryRoads.length,
       averageRoadWidth: Object.values(edges).reduce((sum, edge) => sum + edge.width, 0) / Object.keys(edges).length,
       treesByVulnerability: treesByLevel,
       facilitiesByType: facilitiesByType,
-      totalShelterCapacity: totalCapacity
+      totalShelterCapacity: totalCapacity,
+      buildingsByType: buildingsByType,
+      totalPopulation: totalPopulation,
+      totalBuildingCapacity: totalBuildingCapacity,
+      populationDensity: totalPopulation / 4.0 // Assuming 2km x 2km = 4 sq km
     };
   }
 
@@ -766,7 +983,12 @@ class MapService {
       treesLevelIII: null,
       facilities: null,
       ambulanceStations: null,
-      shelters: null
+      shelters: null,
+      buildings: null,
+      buildingsResidential: null,
+      buildingsCommercial: null,
+      buildingsMixed: null,
+      buildingsIndustrial: null
     };
   }
 }

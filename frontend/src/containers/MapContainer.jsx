@@ -59,6 +59,12 @@ const MapContainer = () => {
             const levelLayerName = `treesLevel${level}`;
             mapService.toggleLayer(levelLayerName, levelVisible);
           });
+        } else if (layerName === 'buildingsByType') {
+          // Handle building type visibility
+          Object.entries(visible).forEach(([buildingType, typeVisible]) => {
+            const typeLayerName = `buildings${buildingType.charAt(0).toUpperCase() + buildingType.slice(1)}`;
+            mapService.toggleLayer(typeLayerName, typeVisible);
+          });
         } else {
           mapService.toggleLayer(layerName, visible);
         }
@@ -229,6 +235,66 @@ const MapContainer = () => {
                     }}></div>
                   </div>
                   <span>樹木-低風險 Trees Level III</span>
+                </div>
+              </>
+            )}
+            {mapData && mapData.building_count > 0 && (
+              <>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '16px',
+                    height: '16px', 
+                    backgroundColor: '#3b82f6',
+                    border: '2px solid #1e40af',
+                    borderRadius: '3px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '10px'
+                  }}>🏘️</div>
+                  <span>住宅建築 Residential</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '18px',
+                    height: '18px', 
+                    backgroundColor: '#f59e0b',
+                    border: '2px solid #d97706',
+                    borderRadius: '3px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px'
+                  }}>🏢</div>
+                  <span>商業建築 Commercial</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '17px',
+                    height: '17px', 
+                    backgroundColor: '#8b5cf6',
+                    border: '2px solid #7c3aed',
+                    borderRadius: '3px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '10px'
+                  }}>🏬</div>
+                  <span>混合建築 Mixed Use</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '19px',
+                    height: '19px', 
+                    backgroundColor: '#6b7280',
+                    border: '2px solid #4b5563',
+                    borderRadius: '3px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px'
+                  }}>🏭</div>
+                  <span>工業建築 Industrial</span>
                 </div>
               </>
             )}

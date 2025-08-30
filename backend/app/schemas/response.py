@@ -54,8 +54,21 @@ class FacilityResponse(BaseModel):
     name: Optional[str] = Field(default=None, description="Facility name")
 
 
+class BuildingResponse(BaseModel):
+    """Building object information (WS-1.5)"""
+    id: str
+    x: float
+    y: float
+    height: float = Field(description="Building height in meters")
+    floors: int = Field(description="Number of floors")
+    building_type: str = Field(description="Building type: residential, commercial, mixed, industrial")
+    population: int = Field(description="Current population in the building")
+    capacity: int = Field(description="Maximum population capacity")
+    footprint_area: float = Field(description="Building footprint area in square meters")
+
+
 class WorldGenerationResponse(BaseModel):
-    """Response schema for world generation API (WS-1.1 + WS-1.2 + WS-1.3)"""
+    """Response schema for world generation API (WS-1.1 + WS-1.2 + WS-1.3 + WS-1.5)"""
     
     # Generation metadata
     generation_id: str = Field(description="Unique identifier for this world generation")
@@ -67,12 +80,14 @@ class WorldGenerationResponse(BaseModel):
     edges: Dict[str, RoadEdgeResponse] = Field(description="Road network edges indexed by ID")
     trees: Dict[str, TreeResponse] = Field(description="Trees indexed by ID (WS-1.2)")
     facilities: Dict[str, FacilityResponse] = Field(description="Facilities indexed by ID (WS-1.3)")
+    buildings: Dict[str, BuildingResponse] = Field(description="Buildings indexed by ID (WS-1.5)")
     
     # Summary statistics  
     node_count: int = Field(description="Total number of nodes in the road network")
     edge_count: int = Field(description="Total number of road segments")
     tree_count: int = Field(description="Total number of trees")
     facility_count: int = Field(description="Total number of facilities")
+    building_count: int = Field(description="Total number of buildings")
     main_road_count: int = Field(description="Number of main roads")
     secondary_road_count: int = Field(description="Number of secondary roads")
     
@@ -81,6 +96,9 @@ class WorldGenerationResponse(BaseModel):
     
     # Facility statistics (WS-1.3)
     facility_stats: Optional[Dict[str, Any]] = Field(description="Facility generation statistics")
+    
+    # Population and building statistics (WS-1.5)
+    population_stats: Optional[Dict[str, Any]] = Field(description="Population and building statistics")
     
     # Generation parameters used
     generation_config: Dict[str, Any] = Field(description="Configuration parameters used for generation")
@@ -128,9 +146,23 @@ class WorldGenerationResponse(BaseModel):
                         "trunk_width": 0.8
                     }
                 },
+                "buildings": {
+                    "building_001": {
+                        "id": "building_001",
+                        "x": 800.0,
+                        "y": 600.0,
+                        "height": 18.0,
+                        "floors": 6,
+                        "building_type": "residential",
+                        "population": 24,
+                        "capacity": 30,
+                        "footprint_area": 250.0
+                    }
+                },
                 "node_count": 45,
                 "edge_count": 38,
                 "tree_count": 156,
+                "building_count": 89,
                 "main_road_count": 4,
                 "secondary_road_count": 34,
                 "tree_stats": {
@@ -139,10 +171,26 @@ class WorldGenerationResponse(BaseModel):
                     "average_height": 10.8,
                     "average_trunk_width": 0.6
                 },
+                "population_stats": {
+                    "total_population": 2340,
+                    "total_buildings": 89,
+                    "total_capacity": 3120,
+                    "average_population_per_building": 26.3,
+                    "population_by_type": {
+                        "residential": 1890,
+                        "commercial": 156,
+                        "mixed": 246,
+                        "industrial": 48
+                    },
+                    "population_density_per_sqkm": 585.0,
+                    "occupancy_rate": 75.0
+                },
                 "generation_config": {
                     "map_size": [2000, 2000],
                     "road_density": 0.7,
-                    "include_trees": True
+                    "include_trees": True,
+                    "include_buildings": True,
+                    "building_density": 0.3
                 }
             }
         }

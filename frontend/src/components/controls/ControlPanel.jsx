@@ -15,6 +15,8 @@ const ControlPanel = () => {
     clearMapData,
     toggleLayer,
     toggleTreeVulnerability,
+    toggleBuildings,
+    toggleBuildingType,
     resetConfig,
     clearError
   } = useSimulationStore();
@@ -237,6 +239,39 @@ const ControlPanel = () => {
               </>
             )}
 
+            {/* Building Generation Toggle */}
+            <div className="pt-2 border-t border-gray-200">
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={localConfig.include_buildings}
+                  onChange={(e) => handleConfigChange('include_buildings', e.target.checked)}
+                  className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 mr-2"
+                />
+                <span className="text-sm font-medium text-gray-700">
+                  生成建築物 (Generate Buildings) - WS-1.5
+                </span>
+              </label>
+            </div>
+
+            {/* Building Parameters - Only show if buildings are enabled */}
+            {localConfig.include_buildings && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  建築物密度 (Building Density): {(localConfig.building_density * 100).toFixed(0)}%
+                </label>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="1.0"
+                  step="0.1"
+                  value={localConfig.building_density}
+                  onChange={(e) => handleConfigChange('building_density', parseFloat(e.target.value))}
+                  className="w-full"
+                />
+              </div>
+            )}
+
             {/* Action Buttons */}
             <div className="grid grid-cols-2 gap-2 pt-2">
               <Button
@@ -371,6 +406,51 @@ const ControlPanel = () => {
                 </div>
               </div>
             )}
+
+            {/* Building Layers */}
+            {mapStats && mapStats.totalBuildings > 0 && (
+              <div className="border-t border-gray-200 pt-3 mt-3">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={layerVisibility.buildings}
+                    onChange={() => toggleBuildings()}
+                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                  />
+                  <span className="ml-2 text-sm text-gray-700 font-medium">
+                    🏢 建築物 (Buildings) - {mapStats.totalBuildings}
+                  </span>
+                </label>
+                
+                {/* Building types */}
+                <div className="ml-4 space-y-2 mt-2">
+                  {[
+                    { type: 'residential', label: '住宅建築', emoji: '🏘️', color: 'text-blue-600', bgColor: 'bg-blue-500' },
+                    { type: 'commercial', label: '商業建築', emoji: '🏢', color: 'text-amber-600', bgColor: 'bg-amber-500' },
+                    { type: 'mixed', label: '混合建築', emoji: '🏬', color: 'text-purple-600', bgColor: 'bg-purple-500' },
+                    { type: 'industrial', label: '工業建築', emoji: '🏭', color: 'text-gray-600', bgColor: 'bg-gray-500' }
+                  ].map(({ type, label, emoji, color, bgColor }) => {
+                    const count = mapStats.buildingsByType?.[type] || 0;
+                    const populationCount = mapStats.populationStats?.population_by_type?.[type] || 0;
+                    
+                    return (
+                      <label key={type} className="flex items-center text-xs">
+                        <input
+                          type="checkbox"
+                          checked={layerVisibility.buildingsByType?.[type]}
+                          onChange={() => toggleBuildingType(type)}
+                          className={`rounded border-gray-300 focus:ring-2 ${color.replace('text-', 'text-')} focus:ring-${color.split('-')[1]}-500`}
+                        />
+                        <div className={`ml-2 w-4 h-4 ${bgColor} rounded flex items-center justify-center text-white text-xs`}>{emoji}</div>
+                        <span className={`ml-1 ${color}`}>
+                          {label}: {count} 棟 ({populationCount} 人)
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </Card>
 
@@ -399,6 +479,22 @@ const ControlPanel = () => {
                   <span className="text-gray-600">樹木總數:</span>
                   <span className="font-medium text-green-600">{mapStats.totalTrees}</span>
                 </div>
+              )}
+              {mapStats.totalBuildings > 0 && (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">建築物總數:</span>
+                    <span className="font-medium text-purple-600">{mapStats.totalBuildings}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">總人口:</span>
+                    <span className="font-medium text-indigo-600">{mapStats.totalPopulation?.toLocaleString() || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">人口密度:</span>
+                    <span className="font-medium text-indigo-600">{Math.round(mapStats.populationDensity || 0)} /km²</span>
+                  </div>
+                </>
               )}
               <div className="flex justify-between">
                 <span className="text-gray-600">地圖大小:</span>

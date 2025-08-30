@@ -86,6 +86,7 @@ class GeneratedMap:
     edges: Dict[str, RoadEdge] = field(default_factory=dict)
     trees: Dict[str, Any] = field(default_factory=dict)  # Will contain Tree objects
     facilities: Dict[str, Any] = field(default_factory=dict)  # Will contain Facility objects
+    buildings: Dict[str, Any] = field(default_factory=dict)  # Will contain Building objects
     graph: nx.Graph = field(default_factory=nx.Graph)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -95,10 +96,12 @@ class GeneratedMap:
             "edges": {edge_id: edge.to_dict() for edge_id, edge in self.edges.items()},
             "trees": {tree_id: tree.to_dict() for tree_id, tree in self.trees.items()},
             "facilities": {facility_id: facility.to_dict() for facility_id, facility in self.facilities.items()},
+            "buildings": {building_id: building.to_dict() for building_id, building in self.buildings.items()},
             "node_count": len(self.nodes),
             "edge_count": len(self.edges),
             "tree_count": len(self.trees),
-            "facility_count": len(self.facilities)
+            "facility_count": len(self.facilities),
+            "building_count": len(self.buildings)
         }
 
 
@@ -128,16 +131,17 @@ class MapGenerator:
         self.ambulance_stations = config.get("ambulance_stations", 3)
         self.shelters = config.get("shelters", 8)
         
-    def generate_map(self, include_trees: bool = True, include_facilities: bool = True) -> GeneratedMap:
+    def generate_map(self, include_trees: bool = True, include_facilities: bool = True, include_buildings: bool = True) -> GeneratedMap:
         """
-        Main method to generate a complete map with road network, trees, and facilities.
+        Main method to generate a complete map with road network, trees, facilities, and buildings.
         
         Args:
             include_trees: Whether to generate trees (WS-1.2)
             include_facilities: Whether to generate facilities (WS-1.3)
+            include_buildings: Whether to generate buildings (WS-1.5)
         
         Returns:
-            GeneratedMap: Complete map data with boundaries, nodes, edges, trees, facilities, and graph
+            GeneratedMap: Complete map data with boundaries, nodes, edges, trees, facilities, buildings, and graph
         """
         # Create map boundary
         boundary = MapBoundary(
@@ -162,6 +166,10 @@ class MapGenerator:
         # Generate facilities on road nodes (WS-1.3)
         if include_facilities:
             self._generate_facilities(generated_map)
+        
+        # Generate buildings and population in non-road areas (WS-1.5)
+        if include_buildings:
+            self._generate_buildings(generated_map)
         
         return generated_map
     
@@ -438,3 +446,18 @@ class MapGenerator:
         
         # Add facilities to map data
         map_data.facilities = facilities
+    
+    def _generate_buildings(self, map_data: GeneratedMap) -> None:
+        """
+        Generate buildings and population in non-road areas (WS-1.5).
+        """
+        from .building_generator import BuildingGenerator
+        
+        # Create building generator with configuration
+        building_generator = BuildingGenerator(self.config)
+        
+        # Generate buildings for the map
+        buildings = building_generator.generate_buildings_for_map(map_data)
+        
+        # Add buildings to map data
+        map_data.buildings = buildings

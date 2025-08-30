@@ -31,7 +31,10 @@ const useSimulationStore = create((set, get) => ({
     include_facilities: true,
     ambulance_stations: 3,
     shelters: 8,
-    shelter_capacity_range: [100, 1000]
+    shelter_capacity_range: [100, 1000],
+    // Building generation parameters (WS-1.5)
+    include_buildings: true,
+    building_density: 0.3
   },
   defaultConfig: null,
   
@@ -54,7 +57,14 @@ const useSimulationStore = create((set, get) => ({
     },
     facilities: true,
     ambulanceStations: true,
-    shelters: true
+    shelters: true,
+    buildings: true,
+    buildingsByType: {
+      residential: true,
+      commercial: true,
+      mixed: true,
+      industrial: true
+    }
   },
   
   // Statistics
@@ -108,12 +118,14 @@ const useSimulationStore = create((set, get) => ({
         totalEdges: mapData.edge_count,
         totalTrees: mapData.tree_count || 0,
         totalFacilities: mapData.facility_count || 0,
+        totalBuildings: mapData.building_count || 0,
         mainRoads: mapData.main_road_count,
         secondaryRoads: mapData.secondary_road_count,
         mapSize: `${mapData.boundary.width}m × ${mapData.boundary.height}m`,
         generationId: mapData.generation_id,
         treeStats: mapData.tree_stats || null,
-        facilityStats: mapData.facility_stats || null
+        facilityStats: mapData.facility_stats || null,
+        populationStats: mapData.population_stats || null
       };
 
       set({ 
@@ -188,7 +200,14 @@ const useSimulationStore = create((set, get) => ({
       },
       facilities: true,
       ambulanceStations: true,
-      shelters: true
+      shelters: true,
+      buildings: true,
+      buildingsByType: {
+        residential: true,
+        commercial: true,
+        mixed: true,
+        industrial: true
+      }
     }
   }),
 
@@ -222,7 +241,9 @@ const useSimulationStore = create((set, get) => ({
       'Tree Max Offset': `${generationConfig.tree_max_offset}m`,
       'Facilities Enabled': generationConfig.include_facilities ? 'Yes' : 'No',
       'Ambulance Stations': generationConfig.ambulance_stations,
-      'Shelters': generationConfig.shelters
+      'Shelters': generationConfig.shelters,
+      'Buildings Enabled': generationConfig.include_buildings ? 'Yes' : 'No',
+      'Building Density': `${(generationConfig.building_density * 100).toFixed(0)}%`
     };
   },
 
@@ -270,6 +291,41 @@ const useSimulationStore = create((set, get) => ({
     generationConfig: {
       ...state.generationConfig,
       ...facilityConfig
+    }
+  })),
+
+  /**
+   * Toggle building visibility
+   */
+  toggleBuildings: () => set((state) => ({
+    layerVisibility: {
+      ...state.layerVisibility,
+      buildings: !state.layerVisibility.buildings
+    }
+  })),
+
+  /**
+   * Toggle building type visibility
+   * @param {string} buildingType - Building type (residential, commercial, mixed, industrial)
+   */
+  toggleBuildingType: (buildingType) => set((state) => ({
+    layerVisibility: {
+      ...state.layerVisibility,
+      buildingsByType: {
+        ...state.layerVisibility.buildingsByType,
+        [buildingType]: !state.layerVisibility.buildingsByType[buildingType]
+      }
+    }
+  })),
+
+  /**
+   * Update building configuration
+   * @param {Object} buildingConfig - New building configuration
+   */
+  updateBuildingConfig: (buildingConfig) => set((state) => ({
+    generationConfig: {
+      ...state.generationConfig,
+      ...buildingConfig
     }
   }))
 }));
