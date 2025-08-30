@@ -83,7 +83,6 @@ When implementing this project, follow the technical architecture specified in `
 - Extensibility for future features (real map data import, dynamic weather models, etc.)
 
 ## Language Context
-
-The project documentation is written in Traditional Chinese, reflecting the Taiwan context for urban resilience planning. The target users are primarily government disaster response units, urban planning departments, and infrastructure management agencies in Chinese-speaking regions.
 - Please write a test script to demo the input/output of the new-added feature if necessary after your implementation.
 - Don't write READMEs after implementation.
+- Backend is already deployed on http://0.0.0.0:8000 . If you need to test it, don't deploy it yourself, use this deployed endpoint
