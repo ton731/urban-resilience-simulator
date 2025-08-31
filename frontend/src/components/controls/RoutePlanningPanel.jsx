@@ -28,10 +28,7 @@ const RoutePlanningPanel = () => {
     enableEndPointSelection,
     clearRoutePoints,
     setRouteVehicleType,
-    setMaxTravelTime,
     calculateRoute,
-    toggleFindAlternatives,
-    toggleRouteComparison,
     
     // Layer visibility actions
     toggleRouteLayer,
@@ -183,60 +180,7 @@ const RoutePlanningPanel = () => {
             </p>
           </div>
 
-          {/* Advanced Options */}
-          <div className="space-y-3">
-            <label className="block text-sm font-medium text-gray-700">
-              進階選項
-            </label>
-            
-            {/* Max Travel Time */}
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">
-                最大旅行時間: {routePlanning.maxTravelTime}秒
-              </label>
-              <input
-                type="range"
-                min="60"
-                max="1800"
-                step="60"
-                value={routePlanning.maxTravelTime}
-                onChange={(e) => setMaxTravelTime(parseInt(e.target.value))}
-                className="w-full"
-              />
-              <div className="flex justify-between text-xs text-gray-400">
-                <span>1分鐘</span>
-                <span>30分鐘</span>
-              </div>
-            </div>
 
-            {/* Find Alternatives Toggle */}
-            <label className="flex items-center">
-              <input
-                type="checkbox"
-                checked={routePlanning.findAlternatives}
-                onChange={toggleFindAlternatives}
-                className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-              />
-              <span className="ml-2 text-sm text-gray-700">
-                尋找替代路線
-              </span>
-            </label>
-
-            {/* Route Comparison Toggle */}
-            {hasDisasterData && (
-              <label className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={routePlanning.showRouteComparison}
-                  onChange={toggleRouteComparison}
-                  className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-                />
-                <span className="ml-2 text-sm text-gray-700">
-                  顯示災前災後對比
-                </span>
-              </label>
-            )}
-          </div>
 
           {/* Calculate Route Button */}
           <button
@@ -337,21 +281,7 @@ const RoutePlanningPanel = () => {
                   </label>
                 )}
 
-                {/* Alternative Routes */}
-                {routePlanning.alternativeRoutes?.length > 0 && (
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={routeLayerVisibility.alternativeRoutes}
-                      onChange={() => toggleRouteLayer('alternativeRoutes')}
-                      className="rounded border-gray-300 text-purple-600"
-                    />
-                    <span className="ml-2 text-sm text-gray-700">
-                      <span className="inline-block w-3 h-3 bg-purple-500 rounded mr-1"></span>
-                      替代路線 ({routePlanning.alternativeRoutes.length})
-                    </span>
-                  </label>
-                )}
+
 
                 {/* Route Info */}
                 {routePlanning.routeStats && (

@@ -145,7 +145,6 @@ const MapContainer = () => {
       const routeData = {
         preDisasterRoute: routePlanning.preDisasterRoute,
         postDisasterRoute: routePlanning.postDisasterRoute,
-        alternativeRoutes: routePlanning.alternativeRoutes,
         routeStats: routePlanning.routeStats
       };
       
@@ -154,7 +153,6 @@ const MapContainer = () => {
   }, [
     routePlanning.preDisasterRoute, 
     routePlanning.postDisasterRoute, 
-    routePlanning.alternativeRoutes,
     routePlanning.routeStats,
     mapData
   ]);
@@ -507,18 +505,7 @@ const MapContainer = () => {
                     <span>災後路徑 Post-disaster Route (紅色)</span>
                   </div>
                 )}
-                {routePlanning.alternativeRoutes?.length > 0 && (
-                  <div className="flex items-center space-x-2">
-                    <div style={{
-                      width: '20px',
-                      height: '4px',
-                      background: '#8b5cf6',
-                      borderRadius: '2px',
-                      backgroundImage: 'repeating-linear-gradient(90deg, transparent, transparent 3px, white 3px, white 6px)'
-                    }}></div>
-                    <span>替代路線 Alternative Routes ({routePlanning.alternativeRoutes.length})</span>
-                  </div>
-                )}
+
                 {routePlanning.routeStats && (
                   <div className="text-xs text-blue-700 mt-1">
                     車輛: {routePlanning.vehicleType} |

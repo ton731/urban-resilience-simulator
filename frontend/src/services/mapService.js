@@ -49,7 +49,6 @@ class MapService {
       routeEndMarker: null,
       preDisasterRoute: null,
       postDisasterRoute: null,
-      alternativeRoutes: null,
       routeInfo: null
     };
     this.currentMapData = null;
@@ -119,7 +118,7 @@ class MapService {
     this.layers.routeEndMarker = L.layerGroup().addTo(this.map);
     this.layers.preDisasterRoute = L.layerGroup().addTo(this.map);
     this.layers.postDisasterRoute = L.layerGroup().addTo(this.map);
-    this.layers.alternativeRoutes = L.layerGroup().addTo(this.map);
+
     this.layers.routeInfo = L.layerGroup().addTo(this.map);
 
     return this.map;
@@ -1401,19 +1400,8 @@ class MapService {
       );
     }
 
-    // Add alternative routes if available
-    if (routeData.alternativeRoutes && routeData.alternativeRoutes.length > 0) {
-      routeData.alternativeRoutes.forEach((altRoute, index) => {
-        if (altRoute.success) {
-          this.addRouteToMap(
-            altRoute,
-            'alternative',
-            centerX, centerY, metersToLat, metersToLng,
-            index
-          );
-        }
-      });
-    }
+
+
 
     // Add route comparison info if available
     if (routeData.routeStats) {
@@ -1504,8 +1492,6 @@ class MapService {
       this.layers.preDisasterRoute.addLayer(routeLine);
     } else if (routeType === 'postDisaster') {
       this.layers.postDisasterRoute.addLayer(routeLine);
-    } else {
-      this.layers.alternativeRoutes.addLayer(routeLine);
     }
 
     // Add direction arrows for better visualization
@@ -1554,8 +1540,6 @@ class MapService {
         this.layers.preDisasterRoute.addLayer(arrowMarker);
       } else if (routeType === 'postDisaster') {
         this.layers.postDisasterRoute.addLayer(arrowMarker);
-      } else {
-        this.layers.alternativeRoutes.addLayer(arrowMarker);
       }
     }
   }
@@ -1610,7 +1594,7 @@ class MapService {
    * Clear all route paths but keep waypoints  
    */
   clearRoutePaths() {
-    ['preDisasterRoute', 'postDisasterRoute', 'alternativeRoutes', 'routeInfo'].forEach(layerName => {
+    ['preDisasterRoute', 'postDisasterRoute', 'routeInfo'].forEach(layerName => {
       if (this.layers[layerName]) {
         this.layers[layerName].clearLayers();
       }
@@ -1628,7 +1612,7 @@ class MapService {
    */
   clearAllRoutes() {
     ['routeStartMarker', 'routeEndMarker', 'preDisasterRoute', 
-     'postDisasterRoute', 'alternativeRoutes', 'routeInfo'].forEach(layerName => {
+     'postDisasterRoute', 'routeInfo'].forEach(layerName => {
       if (this.layers[layerName]) {
         this.layers[layerName].clearLayers();
       }
@@ -1690,8 +1674,7 @@ class MapService {
       stats.comparison = this.currentRouteData.routeStats;
     }
 
-    stats.alternativeCount = this.currentRouteData.alternativeRoutes ? 
-      this.currentRouteData.alternativeRoutes.length : 0;
+
 
     return stats;
   }
@@ -1776,7 +1759,6 @@ class MapService {
       routeEndMarker: null,
       preDisasterRoute: null,
       postDisasterRoute: null,
-      alternativeRoutes: null,
       routeInfo: null
     };
   }

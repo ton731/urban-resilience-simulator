@@ -99,13 +99,7 @@ const useSimulationStore = create((set, get) => ({
     // Route results
     preDisasterRoute: null,    // Route without disaster effects
     postDisasterRoute: null,   // Route with disaster effects
-    alternativeRoutes: [],     // Alternative routes
-    routeStats: null,          // Route comparison statistics
-    
-    // Advanced options
-    maxTravelTime: 600, // Maximum travel time in seconds (10 minutes)
-    findAlternatives: false,
-    showRouteComparison: true
+    routeStats: null           // Route comparison statistics
   },
 
   // Route visualization layers
@@ -114,7 +108,6 @@ const useSimulationStore = create((set, get) => ({
     endMarker: true,
     preDisasterRoute: true,
     postDisasterRoute: true,
-    alternativeRoutes: false,
     routeInfo: true
   },
 
@@ -571,16 +564,7 @@ const useSimulationStore = create((set, get) => ({
     }
   })),
 
-  /**
-   * Set maximum travel time
-   * @param {number} maxTime - Maximum travel time in seconds
-   */
-  setMaxTravelTime: (maxTime) => set((state) => ({
-    routePlanning: {
-      ...state.routePlanning,
-      maxTravelTime: maxTime
-    }
-  })),
+
 
   /**
    * Calculate route between start and end points
@@ -628,8 +612,6 @@ const useSimulationStore = create((set, get) => ({
         start_point: routePlanning.startPoint,
         end_point: routePlanning.endPoint,
         vehicle_type: routePlanning.vehicleType,
-        max_travel_time: routePlanning.maxTravelTime,
-        find_alternatives: routePlanning.findAlternatives,
         simulation_id: null // Pre-disaster route first
       };
 
@@ -662,31 +644,20 @@ const useSimulationStore = create((set, get) => ({
         }
       }
 
-      // Calculate alternative routes if requested
-      let alternativeRoutes = [];
-      if (routePlanning.findAlternatives && preDisasterRoute.success) {
-        try {
-          const alternativesResponse = await simulationAPI.findAlternativePaths(pathRequest, 2, 1.5);
-          alternativeRoutes = alternativesResponse.alternatives || [];
-          console.log('✅ Alternative routes calculated:', alternativeRoutes.length);
-        } catch (error) {
-          console.warn('⚠️ Could not calculate alternative routes:', error.message);
-        }
-      }
+
 
       set((state) => ({
         routePlanning: {
           ...state.routePlanning,
           preDisasterRoute,
           postDisasterRoute,
-          alternativeRoutes,
           routeStats,
           isCalculatingRoute: false,
           routeError: null
         }
       }));
 
-      return { preDisasterRoute, postDisasterRoute, routeStats, alternativeRoutes };
+      return { preDisasterRoute, postDisasterRoute, routeStats };
 
     } catch (error) {
       const errorMessage = error.message || 'Route calculation failed';
@@ -725,25 +696,7 @@ const useSimulationStore = create((set, get) => ({
     }
   })),
 
-  /**
-   * Toggle find alternatives setting
-   */
-  toggleFindAlternatives: () => set((state) => ({
-    routePlanning: {
-      ...state.routePlanning,
-      findAlternatives: !state.routePlanning.findAlternatives
-    }
-  })),
 
-  /**
-   * Toggle route comparison display
-   */
-  toggleRouteComparison: () => set((state) => ({
-    routePlanning: {
-      ...state.routePlanning,
-      showRouteComparison: !state.routePlanning.showRouteComparison
-    }
-  })),
 
   /**
    * Get route planning statistics for display
