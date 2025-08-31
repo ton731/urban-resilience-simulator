@@ -238,17 +238,6 @@ const RoutePlanningPanel = () => {
               </label>
               
               <div className="space-y-2">
-                {/* Start/End Markers */}
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={routeLayerVisibility.startMarker}
-                    onChange={() => toggleRouteLayer('startMarker')}
-                    className="rounded border-gray-300 text-blue-600"
-                  />
-                  <span className="ml-2 text-sm text-gray-700">起終點標記</span>
-                </label>
-
                 {/* Pre-disaster Route */}
                 {routePlanning.preDisasterRoute?.success && (
                   <label className="flex items-center">

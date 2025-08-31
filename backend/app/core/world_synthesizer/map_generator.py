@@ -273,106 +273,165 @@ class MapGenerator:
 
     def _generate_secondary_roads(self, map_data: GeneratedMap) -> None:
         """
-        Generate secondary roads that connect to main roads and form a network.
-        These create natural intersections and provide local connectivity.
+        Generate secondary roads (alleys) within blocks formed by main roads.
+        50% of alleys are partial length (extending from main roads into blocks).
+        50% of alleys are full length (spanning across entire blocks).
+        Each alley maintains consistent directionality (all bidirectional or all unidirectional).
         """
         boundary = map_data.boundary
+        
+        # First, identify all main road positions
+        main_road_x_positions = []
+        main_road_y_positions = []
+        
+        for node in map_data.nodes.values():
+            # Find nodes that are part of main roads
+            connected_main_roads = []
+            for edge in map_data.edges.values():
+                if edge.road_type == "main" and (edge.from_node == node.id or edge.to_node == node.id):
+                    connected_main_roads.append(edge)
+            
+            if connected_main_roads:
+                if node.x not in main_road_x_positions:
+                    main_road_x_positions.append(node.x)
+                if node.y not in main_road_y_positions:
+                    main_road_y_positions.append(node.y)
+        
+        main_road_x_positions.sort()
+        main_road_y_positions.sort()
+        
+        # Generate alleys within each block
+        self._generate_alleys_in_blocks(map_data, main_road_x_positions, main_road_y_positions)
 
-        # Calculate grid for secondary roads
-        grid_spacing = 200  # meters between secondary roads
-        x_positions = np.arange(
-            boundary.min_x + grid_spacing, boundary.max_x, grid_spacing
+    def _generate_alleys_in_blocks(self, map_data: GeneratedMap, x_positions: List[float], y_positions: List[float]) -> None:
+        """
+        Generate alleys within blocks defined by main road positions.
+        """
+        # For each block (rectangle between adjacent main roads)
+        for i in range(len(x_positions) - 1):
+            for j in range(len(y_positions) - 1):
+                block_left = x_positions[i]
+                block_right = x_positions[i + 1]
+                block_bottom = y_positions[j]
+                block_top = y_positions[j + 1]
+                
+                block_width = block_right - block_left
+                block_height = block_top - block_bottom
+                
+                # Generate random number of alleys in this block (1-4 alleys per block)
+                num_alleys = random.randint(1, 4)
+                
+                for _ in range(num_alleys):
+                    # 50% chance for full-length alley, 50% for partial
+                    is_full_length = random.random() < 0.5
+                    
+                    # 50% chance for horizontal alley, 50% for vertical
+                    is_horizontal = random.random() < 0.5
+                    
+                    if is_horizontal:
+                        self._create_horizontal_alley(map_data, block_left, block_right, 
+                                                    block_bottom, block_top, is_full_length)
+                    else:
+                        self._create_vertical_alley(map_data, block_left, block_right, 
+                                                  block_bottom, block_top, is_full_length)
+    
+    def _create_horizontal_alley(self, map_data: GeneratedMap, block_left: float, block_right: float, 
+                               block_bottom: float, block_top: float, is_full_length: bool) -> None:
+        """Create a horizontal alley within a block."""
+        # Random Y position within the block
+        alley_y = block_bottom + random.uniform(0.2, 0.8) * (block_top - block_bottom)
+        
+        # Decide directionality for this entire alley (consistent throughout)
+        is_bidirectional = random.random() > 0.3  # 70% chance bidirectional
+        
+        if is_full_length:
+            # Full-length alley: spans from left main road to right main road
+            start_x = block_left
+            end_x = block_right
+        else:
+            # Partial-length alley: extends from one side into the block
+            if random.random() < 0.5:
+                # Extend from left main road
+                start_x = block_left
+                end_x = block_left + random.uniform(0.3, 0.8) * (block_right - block_left)
+            else:
+                # Extend from right main road
+                end_x = block_right
+                start_x = block_right - random.uniform(0.3, 0.8) * (block_right - block_left)
+        
+        # Create start and end nodes
+        start_node_id = str(uuid.uuid4())
+        end_node_id = str(uuid.uuid4())
+        
+        start_node = MapNode(id=start_node_id, x=start_x, y=alley_y, node_type="intersection")
+        end_node = MapNode(id=end_node_id, x=end_x, y=alley_y, node_type="intersection")
+        
+        map_data.nodes[start_node_id] = start_node
+        map_data.nodes[end_node_id] = end_node
+        
+        # Create the road edge
+        edge_id = str(uuid.uuid4())
+        road_edge = RoadEdge(
+            id=edge_id,
+            from_node=start_node_id,
+            to_node=end_node_id,
+            width=self.secondary_road_width,
+            lanes=self.secondary_road_lanes,
+            is_bidirectional=is_bidirectional,
+            road_type="secondary",
+            speed_limit=30.0,
         )
-        y_positions = np.arange(
-            boundary.min_y + grid_spacing, boundary.max_y, grid_spacing
+        
+        map_data.edges[edge_id] = road_edge
+    
+    def _create_vertical_alley(self, map_data: GeneratedMap, block_left: float, block_right: float, 
+                             block_bottom: float, block_top: float, is_full_length: bool) -> None:
+        """Create a vertical alley within a block."""
+        # Random X position within the block
+        alley_x = block_left + random.uniform(0.2, 0.8) * (block_right - block_left)
+        
+        # Decide directionality for this entire alley (consistent throughout)
+        is_bidirectional = random.random() > 0.3  # 70% chance bidirectional
+        
+        if is_full_length:
+            # Full-length alley: spans from bottom main road to top main road
+            start_y = block_bottom
+            end_y = block_top
+        else:
+            # Partial-length alley: extends from one side into the block
+            if random.random() < 0.5:
+                # Extend from bottom main road
+                start_y = block_bottom
+                end_y = block_bottom + random.uniform(0.3, 0.8) * (block_top - block_bottom)
+            else:
+                # Extend from top main road
+                end_y = block_top
+                start_y = block_top - random.uniform(0.3, 0.8) * (block_top - block_bottom)
+        
+        # Create start and end nodes
+        start_node_id = str(uuid.uuid4())
+        end_node_id = str(uuid.uuid4())
+        
+        start_node = MapNode(id=start_node_id, x=alley_x, y=start_y, node_type="intersection")
+        end_node = MapNode(id=end_node_id, x=alley_x, y=end_y, node_type="intersection")
+        
+        map_data.nodes[start_node_id] = start_node
+        map_data.nodes[end_node_id] = end_node
+        
+        # Create the road edge
+        edge_id = str(uuid.uuid4())
+        road_edge = RoadEdge(
+            id=edge_id,
+            from_node=start_node_id,
+            to_node=end_node_id,
+            width=self.secondary_road_width,
+            lanes=self.secondary_road_lanes,
+            is_bidirectional=is_bidirectional,
+            road_type="secondary",
+            speed_limit=30.0,
         )
-
-        # Generate vertical secondary roads
-        for x in x_positions:
-            if random.random() < self.secondary_road_density:
-                # Add some randomness to position
-                x_actual = x + random.uniform(-50, 50)
-
-                # Create nodes at intersections with horizontal roads
-                nodes_on_road = []
-
-                for y in y_positions:
-                    if random.random() < 0.8:  # 80% chance of intersection
-                        y_actual = y + random.uniform(-30, 30)
-
-                        node_id = str(uuid.uuid4())
-                        node = MapNode(
-                            id=node_id, x=x_actual, y=y_actual, node_type="intersection"
-                        )
-
-                        map_data.nodes[node_id] = node
-                        nodes_on_road.append(node_id)
-
-                # Connect consecutive nodes with road edges
-                for i in range(len(nodes_on_road) - 1):
-                    edge_id = str(uuid.uuid4())
-                    # Some secondary roads are one-way (30% chance)
-                    is_bidirectional = random.random() > 0.3
-                    road_edge = RoadEdge(
-                        id=edge_id,
-                        from_node=nodes_on_road[i],
-                        to_node=nodes_on_road[i + 1],
-                        width=self.secondary_road_width,
-                        lanes=self.secondary_road_lanes,
-                        is_bidirectional=is_bidirectional,
-                        road_type="secondary",
-                        speed_limit=40.0,
-                    )
-
-                    map_data.edges[edge_id] = road_edge
-
-        # Generate horizontal secondary roads
-        for y in y_positions:
-            if random.random() < self.secondary_road_density:
-                y_actual = y + random.uniform(-50, 50)
-
-                nodes_on_road = []
-
-                for x in x_positions:
-                    if random.random() < 0.8:
-                        x_actual = x + random.uniform(-30, 30)
-
-                        # Check if we already have a node near this position
-                        existing_node = self._find_nearby_node(
-                            map_data, x_actual, y_actual, threshold=80.0
-                        )
-
-                        if existing_node:
-                            nodes_on_road.append(existing_node.id)
-                        else:
-                            node_id = str(uuid.uuid4())
-                            node = MapNode(
-                                id=node_id,
-                                x=x_actual,
-                                y=y_actual,
-                                node_type="intersection",
-                            )
-
-                            map_data.nodes[node_id] = node
-                            nodes_on_road.append(node_id)
-
-                # Connect consecutive nodes
-                for i in range(len(nodes_on_road) - 1):
-                    edge_id = str(uuid.uuid4())
-                    # Some secondary roads are one-way (30% chance)
-                    is_bidirectional = random.random() > 0.3
-                    road_edge = RoadEdge(
-                        id=edge_id,
-                        from_node=nodes_on_road[i],
-                        to_node=nodes_on_road[i + 1],
-                        width=self.secondary_road_width,
-                        lanes=self.secondary_road_lanes,
-                        is_bidirectional=is_bidirectional,
-                        road_type="secondary",
-                        speed_limit=40.0,
-                    )
-
-                    map_data.edges[edge_id] = road_edge
+        
+        map_data.edges[edge_id] = road_edge
 
     def _find_nearby_node(
         self, map_data: GeneratedMap, x: float, y: float, threshold: float = 50.0
