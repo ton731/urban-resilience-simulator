@@ -1,5 +1,6 @@
 import React from 'react';
 import useSimulationStore from '../../store/useSimulationStore';
+import Card from '../ui/Card';
 
 /**
  * RoutePlanningPanel - 路線規劃控制面板 (SE-2.2)
@@ -71,20 +72,7 @@ const RoutePlanningPanel = () => {
   const isCalculating = routePlanning.isCalculatingRoute;
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6 mb-4">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center">
-          <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
-            <span className="text-blue-600 text-lg">🗺️</span>
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-gray-800">路線規劃</h3>
-            <p className="text-xs text-gray-500">Route Planning (SE-2.2)</p>
-          </div>
-        </div>
-      </div>
-
+    <Card title="路線規劃 (SE-2.2 Route Planning)" collapsible={true}>
       {!hasMapData && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
           <div className="flex items-center">
@@ -411,7 +399,7 @@ const RoutePlanningPanel = () => {
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 };
 

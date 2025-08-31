@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import useSimulationStore from '../../store/useSimulationStore';
 import Card from '../ui/Card';
 import DisasterSimulationPanel from './DisasterSimulationPanel';
 import RoutePlanningPanel from './RoutePlanningPanel';
 
 const MapControlPanel = () => {
+  const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
   const {
     layerVisibility,
     mapStats,
@@ -14,12 +15,35 @@ const MapControlPanel = () => {
     toggleBuildingType
   } = useSimulationStore();
 
+  const togglePanel = () => {
+    setIsPanelCollapsed(!isPanelCollapsed);
+  };
+
   return (
-    <div className="w-80 bg-gray-50 p-4 overflow-y-auto">
-      <div className="space-y-4">
+    <div className={`${isPanelCollapsed ? 'w-12' : 'w-80'} bg-gray-50 transition-all duration-300 ease-in-out relative`}>
+      {/* Panel Toggle Button */}
+      <button
+        onClick={togglePanel}
+        className="absolute top-4 right-2 z-10 w-8 h-8 bg-white rounded-full shadow-lg border border-gray-200 flex items-center justify-center hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors duration-200"
+        aria-label={isPanelCollapsed ? '展開面板' : '收合面板'}
+      >
+        <svg 
+          className={`w-4 h-4 text-gray-600 transform transition-transform duration-200 ${isPanelCollapsed ? 'rotate-180' : 'rotate-0'}`}
+          fill="none" 
+          stroke="currentColor" 
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
+
+      {/* Panel Content */}
+      {!isPanelCollapsed && (
+        <div className="p-4 overflow-y-auto h-full">
+          <div className="space-y-4">
 
         {/* Layer Controls */}
-        <Card title="圖層控制 (Layer Controls)">
+        <Card title="圖層控制 (Layer Controls)" collapsible={true}>
           <div className="space-y-3">
             {/* Road Layers */}
             {Object.entries({
@@ -179,7 +203,7 @@ const MapControlPanel = () => {
 
         {/* Statistics */}
         {mapStats && (
-          <Card title="地圖統計 (Statistics)">
+          <Card title="地圖統計 (Statistics)" collapsible={true}>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-600">總節點:</span>
@@ -238,7 +262,39 @@ const MapControlPanel = () => {
         {/* Route Planning Panel */}
         <RoutePlanningPanel />
 
-      </div>
+          </div>
+        </div>
+      )}
+
+      {/* Collapsed Panel Content - Mini Panel */}
+      {isPanelCollapsed && (
+        <div className="h-full flex flex-col items-center justify-start pt-16 space-y-4">
+          {/* Mini indicators */}
+          <div className="flex flex-col space-y-2">
+            {/* Layer indicator */}
+            <div className="w-6 h-6 bg-blue-100 rounded flex items-center justify-center">
+              <span className="text-blue-600 text-xs">📋</span>
+            </div>
+            
+            {/* Stats indicator */}
+            {mapStats && (
+              <div className="w-6 h-6 bg-green-100 rounded flex items-center justify-center">
+                <span className="text-green-600 text-xs">📊</span>
+              </div>
+            )}
+            
+            {/* Disaster indicator */}
+            <div className="w-6 h-6 bg-orange-100 rounded flex items-center justify-center">
+              <span className="text-orange-600 text-xs">🌪️</span>
+            </div>
+            
+            {/* Route indicator */}
+            <div className="w-6 h-6 bg-purple-100 rounded flex items-center justify-center">
+              <span className="text-purple-600 text-xs">🗺️</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -58,7 +58,7 @@ const DisasterSimulationPanel = () => {
   const disasterStats = getDisasterStats();
 
   return (
-    <Card title="災害模擬 (SE-2.1 Disaster Simulation)">
+    <Card title="災害模擬 (SE-2.1 Disaster Simulation)" collapsible={true}>
       <div className="space-y-4">
         
         {/* Status indicator */}
@@ -215,7 +215,7 @@ const DisasterSimulationPanel = () => {
 
         {/* Layer visibility controls for disaster visualization */}
         {disasterSimulationData && (
-          <Card title="災害視覺化圖層">
+          <Card title="災害視覺化圖層" collapsible={true}>
             <div className="space-y-2">
               
               <div className="flex items-center justify-between">
