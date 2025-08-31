@@ -136,6 +136,49 @@ export const simulationAPI = {
     } catch (error) {
       throw new Error(`Failed to get simulation result: ${error.response?.data?.detail || error.message}`);
     }
+  },
+
+  /**
+   * Find alternative paths between two points (SE-2.2 Advanced)
+   * @param {Object} pathRequest - Pathfinding request
+   * @param {number} maxAlternatives - Maximum number of alternative paths
+   * @param {number} diversityFactor - Factor to increase cost of previously used edges
+   * @returns {Promise} - Alternative paths result
+   */
+  findAlternativePaths: async (pathRequest, maxAlternatives = 3, diversityFactor = 1.5) => {
+    try {
+      const response = await apiClient.post('/simulation/pathfinding/alternatives', pathRequest, {
+        params: {
+          max_alternatives: maxAlternatives,
+          diversity_factor: diversityFactor
+        }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to find alternative paths: ${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  /**
+   * Analyze road network connectivity for a vehicle type
+   * @param {string} worldGenerationId - World generation ID
+   * @param {string} vehicleType - Vehicle type (car, truck, motorcycle, etc.)
+   * @param {string} simulationId - Optional simulation ID for post-disaster analysis
+   * @returns {Promise} - Network connectivity analysis
+   */
+  analyzeNetworkConnectivity: async (worldGenerationId, vehicleType = 'car', simulationId = null) => {
+    try {
+      const response = await apiClient.post('/simulation/network-analysis', null, {
+        params: {
+          world_generation_id: worldGenerationId,
+          vehicle_type: vehicleType,
+          simulation_id: simulationId
+        }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to analyze network connectivity: ${error.response?.data?.detail || error.message}`);
+    }
   }
 };
 

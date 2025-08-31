@@ -86,6 +86,38 @@ const useSimulationStore = create((set, get) => ({
     serviceArea: false
   },
 
+  // Route Planning State (SE-2.2)
+  routePlanning: {
+    startPoint: null,
+    endPoint: null,
+    vehicleType: 'car', // car, truck, motorcycle, bicycle, emergency
+    isSettingStartPoint: false,
+    isSettingEndPoint: false,
+    isCalculatingRoute: false,
+    routeError: null,
+    
+    // Route results
+    preDisasterRoute: null,    // Route without disaster effects
+    postDisasterRoute: null,   // Route with disaster effects
+    alternativeRoutes: [],     // Alternative routes
+    routeStats: null,          // Route comparison statistics
+    
+    // Advanced options
+    maxTravelTime: 600, // Maximum travel time in seconds (10 minutes)
+    findAlternatives: false,
+    showRouteComparison: true
+  },
+
+  // Route visualization layers
+  routeLayerVisibility: {
+    startMarker: true,
+    endMarker: true,
+    preDisasterRoute: true,
+    postDisasterRoute: true,
+    alternativeRoutes: false,
+    routeInfo: true
+  },
+
   // Actions
   
   /**
@@ -457,7 +489,286 @@ const useSimulationStore = create((set, get) => ({
   /**
    * Clear all simulation-related errors
    */
-  clearSimulationError: () => set({ simulationError: null })
+  clearSimulationError: () => set({ simulationError: null }),
+
+  // Route Planning Actions (SE-2.2)
+
+  /**
+   * Set route planning start point
+   * @param {Array} point - [longitude, latitude] coordinates
+   */
+  setRouteStartPoint: (point) => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      startPoint: point,
+      isSettingStartPoint: false
+    }
+  })),
+
+  /**
+   * Set route planning end point
+   * @param {Array} point - [longitude, latitude] coordinates  
+   */
+  setRouteEndPoint: (point) => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      endPoint: point,
+      isSettingEndPoint: false
+    }
+  })),
+
+  /**
+   * Enable start point selection mode
+   */
+  enableStartPointSelection: () => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      isSettingStartPoint: true,
+      isSettingEndPoint: false
+    }
+  })),
+
+  /**
+   * Enable end point selection mode
+   */
+  enableEndPointSelection: () => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      isSettingStartPoint: false,
+      isSettingEndPoint: true
+    }
+  })),
+
+  /**
+   * Clear route planning waypoints
+   */
+  clearRoutePoints: () => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      startPoint: null,
+      endPoint: null,
+      isSettingStartPoint: false,
+      isSettingEndPoint: false,
+      preDisasterRoute: null,
+      postDisasterRoute: null,
+      alternativeRoutes: [],
+      routeStats: null,
+      routeError: null
+    }
+  })),
+
+  /**
+   * Set vehicle type for route planning
+   * @param {string} vehicleType - Vehicle type (car, truck, motorcycle, etc.)
+   */
+  setRouteVehicleType: (vehicleType) => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      vehicleType
+    }
+  })),
+
+  /**
+   * Set maximum travel time
+   * @param {number} maxTime - Maximum travel time in seconds
+   */
+  setMaxTravelTime: (maxTime) => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      maxTravelTime: maxTime
+    }
+  })),
+
+  /**
+   * Calculate route between start and end points
+   */
+  calculateRoute: async () => {
+    const { mapData, disasterSimulationData, routePlanning } = get();
+    
+    if (!mapData) {
+      set((state) => ({
+        routePlanning: {
+          ...state.routePlanning,
+          routeError: '請先生成地圖才能計算路線'
+        }
+      }));
+      return;
+    }
+
+    if (!routePlanning.startPoint || !routePlanning.endPoint) {
+      set((state) => ({
+        routePlanning: {
+          ...state.routePlanning,
+          routeError: '請設定起點和終點'
+        }
+      }));
+      return;
+    }
+
+    try {
+      set((state) => ({
+        routePlanning: {
+          ...state.routePlanning,
+          isCalculatingRoute: true,
+          routeError: null,
+          preDisasterRoute: null,
+          postDisasterRoute: null,
+          alternativeRoutes: [],
+          routeStats: null
+        }
+      }));
+
+      console.log('🚗 Calculating route from', routePlanning.startPoint, 'to', routePlanning.endPoint);
+
+      const pathRequest = {
+        world_generation_id: mapData.generation_id,
+        start_point: routePlanning.startPoint,
+        end_point: routePlanning.endPoint,
+        vehicle_type: routePlanning.vehicleType,
+        max_travel_time: routePlanning.maxTravelTime,
+        simulation_id: null // Pre-disaster route first
+      };
+
+      // Calculate pre-disaster route
+      const preDisasterRoute = await simulationAPI.findPath(pathRequest);
+      console.log('✅ Pre-disaster route calculated:', preDisasterRoute);
+
+      let postDisasterRoute = null;
+      let routeStats = null;
+
+      // Calculate post-disaster route if disaster simulation exists
+      if (disasterSimulationData) {
+        const postDisasterRequest = {
+          ...pathRequest,
+          simulation_id: disasterSimulationData.simulation_id
+        };
+
+        postDisasterRoute = await simulationAPI.findPath(postDisasterRequest);
+        console.log('✅ Post-disaster route calculated:', postDisasterRoute);
+
+        // Calculate route comparison statistics
+        if (preDisasterRoute.success && postDisasterRoute.success) {
+          routeStats = {
+            distanceIncrease: postDisasterRoute.total_distance - preDisasterRoute.total_distance,
+            timeIncrease: postDisasterRoute.estimated_travel_time - preDisasterRoute.estimated_travel_time,
+            distanceIncreasePercent: ((postDisasterRoute.total_distance - preDisasterRoute.total_distance) / preDisasterRoute.total_distance) * 100,
+            timeIncreasePercent: ((postDisasterRoute.estimated_travel_time - preDisasterRoute.estimated_travel_time) / preDisasterRoute.estimated_travel_time) * 100,
+            blockedRoadsCount: postDisasterRoute.blocked_roads ? postDisasterRoute.blocked_roads.length : 0
+          };
+        }
+      }
+
+      // Calculate alternative routes if requested
+      let alternativeRoutes = [];
+      if (routePlanning.findAlternatives && preDisasterRoute.success) {
+        try {
+          const alternativesResponse = await simulationAPI.findAlternativePaths(pathRequest, 2, 1.5);
+          alternativeRoutes = alternativesResponse.alternatives || [];
+          console.log('✅ Alternative routes calculated:', alternativeRoutes.length);
+        } catch (error) {
+          console.warn('⚠️ Could not calculate alternative routes:', error.message);
+        }
+      }
+
+      set((state) => ({
+        routePlanning: {
+          ...state.routePlanning,
+          preDisasterRoute,
+          postDisasterRoute,
+          alternativeRoutes,
+          routeStats,
+          isCalculatingRoute: false,
+          routeError: null
+        }
+      }));
+
+      return { preDisasterRoute, postDisasterRoute, routeStats, alternativeRoutes };
+
+    } catch (error) {
+      const errorMessage = error.message || 'Route calculation failed';
+      set((state) => ({
+        routePlanning: {
+          ...state.routePlanning,
+          routeError: errorMessage,
+          isCalculatingRoute: false
+        }
+      }));
+      console.error('❌ Route calculation failed:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Toggle route layer visibility
+   * @param {string} layerName - Name of route layer to toggle
+   */
+  toggleRouteLayer: (layerName) => set((state) => ({
+    routeLayerVisibility: {
+      ...state.routeLayerVisibility,
+      [layerName]: !state.routeLayerVisibility[layerName]
+    }
+  })),
+
+  /**
+   * Set route layer visibility
+   * @param {string} layerName - Name of route layer
+   * @param {boolean} visible - Whether layer should be visible
+   */
+  setRouteLayerVisibility: (layerName, visible) => set((state) => ({
+    routeLayerVisibility: {
+      ...state.routeLayerVisibility,
+      [layerName]: visible
+    }
+  })),
+
+  /**
+   * Toggle find alternatives setting
+   */
+  toggleFindAlternatives: () => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      findAlternatives: !state.routePlanning.findAlternatives
+    }
+  })),
+
+  /**
+   * Toggle route comparison display
+   */
+  toggleRouteComparison: () => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      showRouteComparison: !state.routePlanning.showRouteComparison
+    }
+  })),
+
+  /**
+   * Get route planning statistics for display
+   */
+  getRouteStats: () => {
+    const { routePlanning } = get();
+    
+    if (!routePlanning.routeStats) return null;
+    
+    const stats = routePlanning.routeStats;
+    
+    return {
+      '距離變化': `${stats.distanceIncrease > 0 ? '+' : ''}${stats.distanceIncrease.toFixed(1)}m (${stats.distanceIncreasePercent > 0 ? '+' : ''}${stats.distanceIncreasePercent.toFixed(1)}%)`,
+      '時間變化': `${stats.timeIncrease > 0 ? '+' : ''}${stats.timeIncrease.toFixed(1)}s (${stats.timeIncreasePercent > 0 ? '+' : ''}${stats.timeIncreasePercent.toFixed(1)}%)`,
+      '受阻道路數': `${stats.blockedRoadsCount}條`,
+      '車輛類型': routePlanning.vehicleType,
+      '最大旅行時間': `${routePlanning.maxTravelTime}秒`
+    };
+  },
+
+  /**
+   * Clear route planning error
+   */
+  clearRouteError: () => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      routeError: null
+    }
+  }))
 }));
 
 export default useSimulationStore;

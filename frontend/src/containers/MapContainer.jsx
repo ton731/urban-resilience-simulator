@@ -12,7 +12,13 @@ const MapContainer = () => {
     isLoading,
     disasterSimulationData,
     disasterLayerVisibility,
-    isRunningSimulation
+    isRunningSimulation,
+    // Route planning state
+    routePlanning,
+    routeLayerVisibility,
+    // Route planning actions
+    setRouteStartPoint,
+    setRouteEndPoint
   } = useSimulationStore();
 
   // Initialize map on component mount
@@ -96,6 +102,71 @@ const MapContainer = () => {
       });
     }
   }, [disasterLayerVisibility, disasterSimulationData]);
+
+  // Handle route waypoint setting interactions
+  useEffect(() => {
+    if (mapInstanceRef.current && mapData) {
+      if (routePlanning.isSettingStartPoint || routePlanning.isSettingEndPoint) {
+        // Set up map click handler for waypoint selection
+        const handleWaypointClick = (worldCoords, latLng) => {
+          if (routePlanning.isSettingStartPoint) {
+            setRouteStartPoint(worldCoords);
+          } else if (routePlanning.isSettingEndPoint) {
+            setRouteEndPoint(worldCoords);
+          }
+        };
+        
+        mapService.setRouteWaypointClickHandler(handleWaypointClick);
+      } else {
+        // Remove click handler when not setting waypoints
+        mapService.removeRouteWaypointClickHandler();
+      }
+    }
+    
+    // Cleanup on unmount or when setting mode changes
+    return () => {
+      if (mapInstanceRef.current) {
+        mapService.removeRouteWaypointClickHandler();
+      }
+    };
+  }, [routePlanning.isSettingStartPoint, routePlanning.isSettingEndPoint, mapData, setRouteStartPoint, setRouteEndPoint]);
+
+  // Update route waypoints visualization
+  useEffect(() => {
+    if (mapInstanceRef.current && mapData) {
+      mapService.updateRouteWaypoints(routePlanning.startPoint, routePlanning.endPoint);
+    }
+  }, [routePlanning.startPoint, routePlanning.endPoint, mapData]);
+
+  // Update route visualization
+  useEffect(() => {
+    if (mapInstanceRef.current && mapData && 
+        (routePlanning.preDisasterRoute || routePlanning.postDisasterRoute)) {
+      const routeData = {
+        preDisasterRoute: routePlanning.preDisasterRoute,
+        postDisasterRoute: routePlanning.postDisasterRoute,
+        alternativeRoutes: routePlanning.alternativeRoutes,
+        routeStats: routePlanning.routeStats
+      };
+      
+      mapService.updateRouteVisualization(routeData);
+    }
+  }, [
+    routePlanning.preDisasterRoute, 
+    routePlanning.postDisasterRoute, 
+    routePlanning.alternativeRoutes,
+    routePlanning.routeStats,
+    mapData
+  ]);
+
+  // Update route layer visibility
+  useEffect(() => {
+    if (mapInstanceRef.current) {
+      Object.entries(routeLayerVisibility).forEach(([layerName, visible]) => {
+        mapService.toggleRouteLayer(layerName, visible);
+      });
+    }
+  }, [routeLayerVisibility]);
 
   return (
     <div className="relative flex-1 bg-gray-100">
@@ -373,6 +444,91 @@ const MapContainer = () => {
                   總計 {disasterSimulationData.total_trees_affected} 棵樹倒塌，
                   {disasterSimulationData.total_roads_affected} 條道路受影響
                 </div>
+              </>
+            )}
+
+            {/* Route Planning Legend */}
+            {(routePlanning.preDisasterRoute || routePlanning.postDisasterRoute) && (
+              <>
+                <div className="border-t border-gray-300 pt-2 mt-2">
+                  <h5 className="font-medium mb-1 text-blue-800">🗺️ 路線規劃結果</h5>
+                </div>
+                {(routePlanning.startPoint || routePlanning.endPoint) && (
+                  <>
+                    <div className="flex items-center space-x-2">
+                      <div style={{
+                        width: '20px',
+                        height: '20px',
+                        backgroundColor: '#10b981',
+                        border: '3px solid white',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '10px',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                      }}>🟢</div>
+                      <span>起點 Start Point</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <div style={{
+                        width: '20px',
+                        height: '20px',
+                        backgroundColor: '#ef4444',
+                        border: '3px solid white',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '10px',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                      }}>🔴</div>
+                      <span>終點 End Point</span>
+                    </div>
+                  </>
+                )}
+                {routePlanning.preDisasterRoute?.success && (
+                  <div className="flex items-center space-x-2">
+                    <div style={{
+                      width: '20px',
+                      height: '4px',
+                      background: '#10b981',
+                      borderRadius: '2px'
+                    }}></div>
+                    <span>災前路徑 Pre-disaster Route</span>
+                  </div>
+                )}
+                {routePlanning.postDisasterRoute?.success && (
+                  <div className="flex items-center space-x-2">
+                    <div style={{
+                      width: '20px',
+                      height: '4px',
+                      background: '#ef4444',
+                      borderRadius: '2px'
+                    }}></div>
+                    <span>災後路徑 Post-disaster Route</span>
+                  </div>
+                )}
+                {routePlanning.alternativeRoutes?.length > 0 && (
+                  <div className="flex items-center space-x-2">
+                    <div style={{
+                      width: '20px',
+                      height: '4px',
+                      background: '#8b5cf6',
+                      borderRadius: '2px',
+                      backgroundImage: 'repeating-linear-gradient(90deg, transparent, transparent 3px, white 3px, white 6px)'
+                    }}></div>
+                    <span>替代路線 Alternative Routes ({routePlanning.alternativeRoutes.length})</span>
+                  </div>
+                )}
+                {routePlanning.routeStats && (
+                  <div className="text-xs text-blue-700 mt-1">
+                    車輛: {routePlanning.vehicleType} |
+                    {routePlanning.routeStats.distanceIncrease !== undefined && (
+                      <> 距離變化: {routePlanning.routeStats.distanceIncrease > 0 ? '+' : ''}{routePlanning.routeStats.distanceIncrease.toFixed(0)}m</>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>

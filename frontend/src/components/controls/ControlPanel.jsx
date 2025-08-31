@@ -3,6 +3,7 @@ import useSimulationStore from '../../store/useSimulationStore';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import DisasterSimulationPanel from './DisasterSimulationPanel';
+import RoutePlanningPanel from './RoutePlanningPanel';
 
 const ControlPanel = () => {
   const {
@@ -512,6 +513,9 @@ const ControlPanel = () => {
         
         {/* Disaster Simulation Panel */}
         <DisasterSimulationPanel />
+        
+        {/* Route Planning Panel */}
+        <RoutePlanningPanel />
 
         {/* Error Display */}
         {error && (

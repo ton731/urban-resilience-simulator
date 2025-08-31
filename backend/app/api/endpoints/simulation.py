@@ -3,7 +3,8 @@ FastAPI endpoints for disaster simulation and network analysis (SE-2.1, SE-2.2)
 """
 
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from datetime import datetime
 import logging
 
 from app.schemas.request import (
@@ -225,6 +226,24 @@ async def find_path(request: PathfindingRequest):
         logger.info(f"Finding path from {request.start_point} to {request.end_point} for {request.vehicle_type}")
         result = network_analyzer.find_path(pathfinding_request)
         
+        # Optionally find alternative routes if the main path succeeded
+        alternative_routes = []
+        if result.success and getattr(request, 'find_alternatives', False):
+            try:
+                alternatives = network_analyzer.find_alternative_paths(
+                    pathfinding_request, max_alternatives=2, diversity_factor=1.5
+                )
+                # Skip the first alternative as it might be very similar to the main path
+                for alt in alternatives[1:]:
+                    alternative_routes.append({
+                        "path_coordinates": alt.path_coordinates,
+                        "total_distance": alt.total_distance,
+                        "estimated_travel_time": alt.estimated_travel_time,
+                        "blocked_roads": alt.blocked_roads
+                    })
+            except Exception as e:
+                logger.warning(f"Could not find alternative routes: {str(e)}")
+        
         return PathfindingResponse(
             success=result.success,
             path_coordinates=result.path_coordinates,
@@ -235,7 +254,7 @@ async def find_path(request: PathfindingRequest):
             world_generation_id=request.world_generation_id,
             simulation_id=request.simulation_id,
             blocked_roads=result.blocked_roads,
-            alternative_routes=result.alternative_routes
+            alternative_routes=alternative_routes
         )
         
     except HTTPException:
@@ -309,17 +328,16 @@ async def calculate_service_area(request: ServiceAreaRequest):
             max_travel_time=request.max_travel_time
         )
         
-        # Calculate multiple isochrones if requested
+        # Calculate multiple isochrones if requested (optimized)
         isochrones = None
         if request.time_intervals:
-            isochrones = {}
-            for time_interval in sorted(request.time_intervals):
-                isochrone_coords = network_analyzer.calculate_service_area(
-                    center_point=request.center_point,
-                    vehicle_type=vehicle_type_enum,
-                    max_travel_time=time_interval
-                )
-                isochrones[str(int(time_interval))] = isochrone_coords
+            isochrones_dict = network_analyzer.calculate_multiple_isochrones(
+                center_point=request.center_point,
+                vehicle_type=vehicle_type_enum,
+                time_intervals=request.time_intervals
+            )
+            # Convert float keys to string keys for JSON serialization
+            isochrones = {str(int(k)): v for k, v in isochrones_dict.items()}
         
         # Calculate approximate area (simplified)
         # In practice, you'd use proper geometric calculations
@@ -446,6 +464,111 @@ async def analyze_network_connectivity(
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error during network analysis: {str(e)}"
+        )
+
+
+@router.post("/pathfinding/alternatives")
+async def find_alternative_paths(
+    request: PathfindingRequest,
+    max_alternatives: int = 3,
+    diversity_factor: float = 1.5
+):
+    """
+    Find multiple alternative paths between two points (SE-2.2 Advanced).
+    
+    This endpoint finds diverse alternative routes useful for emergency 
+    response planning and route redundancy analysis.
+    
+    Args:
+        request: PathfindingRequest with start/end points and vehicle type
+        max_alternatives: Maximum number of alternative paths to find
+        diversity_factor: Factor to increase cost of previously used edges
+        
+    Returns:
+        List of alternative PathfindingResponse objects
+    """
+    try:
+        # Validate world generation exists
+        if request.world_generation_id not in _world_states:
+            raise HTTPException(
+                status_code=404,
+                detail=f"World generation {request.world_generation_id} not found"
+            )
+        
+        # Get network analyzer
+        network_analyzer = None
+        
+        if request.simulation_id:
+            if request.simulation_id not in _network_analyzers:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Simulation {request.simulation_id} not found"
+                )
+            network_analyzer = _network_analyzers[request.simulation_id]
+        else:
+            world_data = _world_states[request.world_generation_id]
+            network_analyzer = NetworkAnalyzer()
+            network_analyzer.initialize_road_network(
+                world_data.get("nodes", {}),
+                world_data.get("edges", {})
+            )
+        
+        # Validate vehicle type
+        try:
+            vehicle_type_enum = VehicleType(request.vehicle_type.lower())
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid vehicle type: {request.vehicle_type}"
+            )
+        
+        # Create pathfinding request
+        pathfinding_request = SimPathfindingRequest(
+            start_point=request.start_point,
+            end_point=request.end_point,
+            vehicle_type=vehicle_type_enum,
+            max_travel_time=request.max_travel_time
+        )
+        
+        # Find alternative paths
+        logger.info(f"Finding {max_alternatives} alternative paths from {request.start_point} to {request.end_point}")
+        alternatives = network_analyzer.find_alternative_paths(
+            pathfinding_request, max_alternatives, diversity_factor
+        )
+        
+        # Convert to response format
+        alternative_responses = []
+        for i, result in enumerate(alternatives):
+            alternative_responses.append(PathfindingResponse(
+                success=result.success,
+                path_coordinates=result.path_coordinates,
+                path_node_ids=result.path_node_ids,
+                total_distance=result.total_distance,
+                estimated_travel_time=result.estimated_travel_time,
+                vehicle_type=result.vehicle_type.value,
+                world_generation_id=request.world_generation_id,
+                simulation_id=request.simulation_id,
+                blocked_roads=result.blocked_roads,
+                alternative_routes=[]  # Not needed for individual alternatives
+            ))
+        
+        return {
+            "alternatives": alternative_responses,
+            "total_alternatives_found": len(alternatives),
+            "max_alternatives_requested": max_alternatives,
+            "diversity_factor_used": diversity_factor,
+            "start_point": request.start_point,
+            "end_point": request.end_point,
+            "vehicle_type": request.vehicle_type
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error finding alternative paths: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error finding alternative paths: {str(e)}"
         )
 
 

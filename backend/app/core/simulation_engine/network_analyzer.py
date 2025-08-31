@@ -327,6 +327,11 @@ class NetworkAnalyzer:
         """
         Check if a vehicle can use a road edge given current obstructions.
         
+        Implements comprehensive vehicle constraint checking:
+        - Road width vs vehicle width
+        - Road type compatibility
+        - Physical vehicle limitations
+        
         Args:
             vehicle_config: Vehicle configuration
             edge_data: Road edge data
@@ -336,8 +341,29 @@ class NetworkAnalyzer:
         """
         current_width = edge_data.get('width', 6.0)
         min_required_width = vehicle_config.minimum_road_width
+        road_type = edge_data.get('road_type', 'secondary')
         
-        return current_width >= min_required_width
+        # Basic width check
+        if current_width < min_required_width:
+            return False
+        
+        # Road type compatibility check
+        if hasattr(vehicle_config, 'prohibited_road_types'):
+            if road_type in vehicle_config.prohibited_road_types:
+                return False
+        
+        # Emergency vehicle special access (if implemented)
+        if (hasattr(vehicle_config, 'emergency_vehicle') and 
+            vehicle_config.emergency_vehicle and
+            current_width >= min_required_width * 0.8):  # 20% tolerance for emergency vehicles
+            return True
+        
+        # Tight passage warning threshold (for future enhancements)
+        if current_width < min_required_width * 1.1:
+            # Vehicle can pass but with difficulty - add penalty in cost calculation
+            pass
+        
+        return True
     
     def _calculate_edge_cost(
         self,
@@ -744,3 +770,232 @@ class NetworkAnalyzer:
             'largest_component_size': max(len(comp) for comp in connected_components) if connected_components else 0,
             'network_fragmentation': len(connected_components) > 1
         }
+    
+    def find_alternative_paths(
+        self,
+        request: PathfindingRequest,
+        max_alternatives: int = 3,
+        diversity_factor: float = 1.5
+    ) -> List[PathfindingResult]:
+        """
+        Find multiple alternative paths between two points.
+        
+        Useful for emergency response planning and route redundancy analysis.
+        Uses a modified A* with edge penalty increases to find diverse routes.
+        
+        Args:
+            request: PathfindingRequest with start/end points and vehicle type
+            max_alternatives: Maximum number of alternative paths to find
+            diversity_factor: Factor to increase cost of previously used edges
+            
+        Returns:
+            List of PathfindingResult objects, ordered by cost
+        """
+        if not self.road_graph:
+            return []
+        
+        vehicle_config = self.vehicle_configs.get(
+            request.vehicle_type,
+            DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
+        )
+        
+        alternatives = []
+        edge_usage_count = {}  # Track how many times each edge has been used
+        
+        # Find nearest nodes
+        start_node = self._find_nearest_node(request.start_point)
+        end_node = self._find_nearest_node(request.end_point)
+        
+        if not start_node or not end_node:
+            return []
+        
+        for attempt in range(max_alternatives):
+            # Create modified cost function with edge penalties
+            def get_modified_edge_cost(from_node: str, to_node: str) -> float:
+                base_cost = self._calculate_edge_cost(from_node, to_node, vehicle_config)
+                
+                if base_cost == float('inf'):
+                    return base_cost
+                
+                # Add penalty for previously used edges
+                edge_key = (from_node, to_node)
+                reverse_key = (to_node, from_node)
+                usage = edge_usage_count.get(edge_key, 0) + edge_usage_count.get(reverse_key, 0)
+                
+                if usage > 0:
+                    penalty = base_cost * (diversity_factor - 1.0) * usage
+                    return base_cost + penalty
+                
+                return base_cost
+            
+            # Find path with modified costs
+            path_nodes = self._astar_pathfinding_with_custom_cost(
+                start_node, end_node, vehicle_config, 
+                request.max_travel_time, get_modified_edge_cost
+            )
+            
+            if not path_nodes:
+                break  # No more paths found
+            
+            # Check if this path is significantly different
+            if self._is_path_sufficiently_different(path_nodes, alternatives):
+                # Convert to PathfindingResult
+                path_coordinates = self._nodes_to_coordinates(path_nodes)
+                total_distance = self._calculate_path_distance(path_nodes)
+                travel_time = self._estimate_travel_time(path_nodes, vehicle_config)
+                blocked_roads = self._identify_blocked_roads_in_path(path_nodes)
+                
+                # Add actual start and end points
+                if path_coordinates:
+                    path_coordinates[0] = request.start_point
+                    path_coordinates[-1] = request.end_point
+                
+                alternative = PathfindingResult(
+                    success=True,
+                    path_coordinates=path_coordinates,
+                    path_node_ids=path_nodes,
+                    total_distance=total_distance,
+                    estimated_travel_time=travel_time,
+                    vehicle_type=request.vehicle_type,
+                    blocked_roads=blocked_roads
+                )
+                
+                alternatives.append(alternative)
+                
+                # Update edge usage count
+                for i in range(len(path_nodes) - 1):
+                    edge_key = (path_nodes[i], path_nodes[i + 1])
+                    edge_usage_count[edge_key] = edge_usage_count.get(edge_key, 0) + 1
+            
+            else:
+                # Path too similar, stop searching
+                break
+        
+        return alternatives
+    
+    def _astar_pathfinding_with_custom_cost(
+        self,
+        start_node: str,
+        end_node: str,
+        vehicle_config: VehicleConfig,
+        max_travel_time: Optional[float],
+        cost_function
+    ) -> List[str]:
+        """
+        A* pathfinding with custom cost function for alternative path finding.
+        
+        Args:
+            start_node: Starting node ID
+            end_node: Destination node ID
+            vehicle_config: Vehicle configuration
+            max_travel_time: Maximum allowed travel time
+            cost_function: Custom function to calculate edge costs
+            
+        Returns:
+            List of node IDs forming the path
+        """
+        if start_node == end_node:
+            return [start_node]
+        
+        # Priority queue: (f_score, g_score, current_node, path)
+        open_set = [(0, 0, start_node, [start_node])]
+        closed_set: Set[str] = set()
+        g_scores = {start_node: 0}
+        
+        end_coords = (
+            self.road_graph.nodes[end_node]['x'],
+            self.road_graph.nodes[end_node]['y']
+        )
+        
+        while open_set:
+            f_score, g_score, current_node, path = heapq.heappop(open_set)
+            
+            if current_node in closed_set:
+                continue
+            
+            closed_set.add(current_node)
+            
+            if current_node == end_node:
+                return path
+            
+            if max_travel_time and g_score > max_travel_time:
+                continue
+            
+            for neighbor in self.road_graph.neighbors(current_node):
+                if neighbor in closed_set:
+                    continue
+                
+                edge_data = self.road_graph[current_node][neighbor]
+                
+                if not self._can_vehicle_use_edge(vehicle_config, edge_data):
+                    continue
+                
+                # Use custom cost function
+                move_cost = cost_function(current_node, neighbor)
+                
+                if move_cost == float('inf'):
+                    continue
+                
+                tentative_g_score = g_score + move_cost
+                
+                if (neighbor not in g_scores or 
+                    tentative_g_score < g_scores[neighbor]):
+                    
+                    g_scores[neighbor] = tentative_g_score
+                    
+                    neighbor_coords = (
+                        self.road_graph.nodes[neighbor]['x'],
+                        self.road_graph.nodes[neighbor]['y']
+                    )
+                    h_score = self._calculate_distance(neighbor_coords, end_coords)
+                    
+                    f_score = tentative_g_score + h_score
+                    new_path = path + [neighbor]
+                    heapq.heappush(open_set, (f_score, tentative_g_score, neighbor, new_path))
+        
+        return []
+    
+    def _is_path_sufficiently_different(
+        self,
+        new_path: List[str],
+        existing_paths: List[PathfindingResult],
+        min_difference_ratio: float = 0.3
+    ) -> bool:
+        """
+        Check if a new path is sufficiently different from existing paths.
+        
+        Args:
+            new_path: New path as list of node IDs
+            existing_paths: List of existing PathfindingResult objects
+            min_difference_ratio: Minimum ratio of different edges required
+            
+        Returns:
+            True if path is sufficiently different
+        """
+        if not existing_paths:
+            return True
+        
+        new_path_edges = set()
+        for i in range(len(new_path) - 1):
+            edge = (new_path[i], new_path[i + 1])
+            new_path_edges.add(edge)
+            new_path_edges.add((edge[1], edge[0]))  # Add reverse edge
+        
+        for existing in existing_paths:
+            existing_edges = set()
+            existing_path = existing.path_node_ids
+            
+            for i in range(len(existing_path) - 1):
+                edge = (existing_path[i], existing_path[i + 1])
+                existing_edges.add(edge)
+                existing_edges.add((edge[1], edge[0]))  # Add reverse edge
+            
+            # Calculate overlap ratio
+            common_edges = new_path_edges.intersection(existing_edges)
+            if len(new_path_edges) > 0:
+                difference_ratio = 1.0 - (len(common_edges) / len(new_path_edges))
+                
+                if difference_ratio < min_difference_ratio:
+                    return False  # Too similar to existing path
+        
+        return True

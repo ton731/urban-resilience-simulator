@@ -43,10 +43,18 @@ class MapService {
       treeBlockages: null,
       roadObstructions: null,
       servicePath: null,
-      serviceArea: null
+      serviceArea: null,
+      // Route planning layers (SE-2.2)
+      routeStartMarker: null,
+      routeEndMarker: null,
+      preDisasterRoute: null,
+      postDisasterRoute: null,
+      alternativeRoutes: null,
+      routeInfo: null
     };
     this.currentMapData = null;
     this.currentDisasterData = null;
+    this.currentRouteData = null;
   }
 
   /**
@@ -105,6 +113,14 @@ class MapService {
     this.layers.roadObstructions = L.layerGroup().addTo(this.map);
     this.layers.servicePath = L.layerGroup().addTo(this.map);
     this.layers.serviceArea = L.layerGroup().addTo(this.map);
+
+    // Initialize route planning layers (SE-2.2)
+    this.layers.routeStartMarker = L.layerGroup().addTo(this.map);
+    this.layers.routeEndMarker = L.layerGroup().addTo(this.map);
+    this.layers.preDisasterRoute = L.layerGroup().addTo(this.map);
+    this.layers.postDisasterRoute = L.layerGroup().addTo(this.map);
+    this.layers.alternativeRoutes = L.layerGroup().addTo(this.map);
+    this.layers.routeInfo = L.layerGroup().addTo(this.map);
 
     return this.map;
   }
@@ -1189,16 +1205,497 @@ class MapService {
     };
   }
 
+  // === Route Planning Visualization Methods (SE-2.2) ===
+
+  /**
+   * Add route planning waypoint markers
+   * @param {Array} startPoint - [lng, lat] coordinates for start point
+   * @param {Array} endPoint - [lng, lat] coordinates for end point  
+   */
+  updateRouteWaypoints(startPoint, endPoint) {
+    if (!this.map || !this.currentMapData) return;
+
+    // Clear existing markers
+    this.clearRouteWaypoints();
+
+    const { boundary } = this.currentMapData;
+    const centerX = (boundary.min_x + boundary.max_x) / 2;
+    const centerY = (boundary.min_y + boundary.max_y) / 2;
+    const metersToLat = 1 / 111000;
+    const metersToLng = 1 / 111000;
+
+    // Add start point marker
+    if (startPoint) {
+      const startLat = (startPoint[1] - centerY) * metersToLat;
+      const startLng = (startPoint[0] - centerX) * metersToLng;
+      
+      const startMarker = this._createWaypointMarker([startLat, startLng], 'start');
+      this.layers.routeStartMarker.addLayer(startMarker);
+    }
+
+    // Add end point marker  
+    if (endPoint) {
+      const endLat = (endPoint[1] - centerY) * metersToLat;
+      const endLng = (endPoint[0] - centerX) * metersToLng;
+      
+      const endMarker = this._createWaypointMarker([endLat, endLng], 'end');
+      this.layers.routeEndMarker.addLayer(endMarker);
+    }
+  }
+
+  /**
+   * Create waypoint marker for route planning
+   * @param {Array} position - [lat, lng] position
+   * @param {string} type - 'start' or 'end'
+   * @returns {Object} - Leaflet marker
+   */
+  _createWaypointMarker(position, type) {
+    const isStart = type === 'start';
+    const markerColor = isStart ? '#10b981' : '#ef4444'; // Green for start, red for end
+    const icon = isStart ? '🟢' : '🔴';
+    const label = isStart ? '起點' : '終點';
+
+    const waypointIcon = L.divIcon({
+      html: `
+        <div style="
+          width: 30px;
+          height: 30px;
+          background-color: ${markerColor};
+          border: 3px solid white;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 16px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+          position: relative;
+        ">
+          ${icon}
+          <div style="
+            position: absolute;
+            top: 35px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: white;
+            color: ${markerColor};
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            border: 1px solid ${markerColor};
+            white-space: nowrap;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+          ">${label}</div>
+        </div>
+      `,
+      className: 'waypoint-marker',
+      iconSize: [30, 50],
+      iconAnchor: [15, 15],
+      popupAnchor: [0, -15]
+    });
+
+    const marker = L.marker(position, { icon: waypointIcon });
+    
+    marker.bindPopup(`
+      <div style="font-family: monospace;">
+        <strong>🎯 路線${label}</strong><br/>
+        <strong>座標:</strong> ${position[0].toFixed(6)}, ${position[1].toFixed(6)}<br/>
+        <small>點擊地圖其他位置可重新設定</small>
+      </div>
+    `);
+
+    return marker;
+  }
+
+  /**
+   * Clear route waypoint markers
+   */
+  clearRouteWaypoints() {
+    this.layers.routeStartMarker.clearLayers();
+    this.layers.routeEndMarker.clearLayers();
+  }
+
+  /**
+   * Update route visualization with paths
+   * @param {Object} routeData - Route planning results
+   */
+  updateRouteVisualization(routeData) {
+    if (!this.map || !this.currentMapData) return;
+
+    this.currentRouteData = routeData;
+    this.clearRoutePaths();
+
+    const { boundary } = this.currentMapData;
+    const centerX = (boundary.min_x + boundary.max_x) / 2;
+    const centerY = (boundary.min_y + boundary.max_y) / 2;
+    const metersToLat = 1 / 111000;
+    const metersToLng = 1 / 111000;
+
+    // Add pre-disaster route if available
+    if (routeData.preDisasterRoute && routeData.preDisasterRoute.success) {
+      this.addRouteToMap(
+        routeData.preDisasterRoute,
+        'preDisaster',
+        centerX, centerY, metersToLat, metersToLng
+      );
+    }
+
+    // Add post-disaster route if available  
+    if (routeData.postDisasterRoute && routeData.postDisasterRoute.success) {
+      this.addRouteToMap(
+        routeData.postDisasterRoute,
+        'postDisaster',
+        centerX, centerY, metersToLat, metersToLng
+      );
+    }
+
+    // Add alternative routes if available
+    if (routeData.alternativeRoutes && routeData.alternativeRoutes.length > 0) {
+      routeData.alternativeRoutes.forEach((altRoute, index) => {
+        if (altRoute.success) {
+          this.addRouteToMap(
+            altRoute,
+            'alternative',
+            centerX, centerY, metersToLat, metersToLng,
+            index
+          );
+        }
+      });
+    }
+
+    // Add route comparison info if available
+    if (routeData.routeStats) {
+      this.addRouteComparisonInfo(routeData.routeStats);
+    }
+  }
+
+  /**
+   * Add single route to map
+   * @param {Object} route - Route data
+   * @param {string} routeType - 'preDisaster', 'postDisaster', or 'alternative'  
+   * @param {number} centerX - Map center X coordinate
+   * @param {number} centerY - Map center Y coordinate
+   * @param {number} metersToLat - Conversion factor
+   * @param {number} metersToLng - Conversion factor
+   * @param {number} altIndex - Alternative route index (for alternatives)
+   */
+  addRouteToMap(route, routeType, centerX, centerY, metersToLat, metersToLng, altIndex = 0) {
+    if (!route.path_coordinates || route.path_coordinates.length === 0) return;
+
+    // Convert coordinates
+    const routeCoords = route.path_coordinates.map(coord => [
+      (coord[1] - centerY) * metersToLat,
+      (coord[0] - centerX) * metersToLng
+    ]);
+
+    // Define route styles
+    const routeStyles = {
+      preDisaster: {
+        color: '#10b981',
+        weight: 6,
+        opacity: 0.8,
+        dashArray: null,
+        name: '災前最佳路徑'
+      },
+      postDisaster: {
+        color: '#ef4444',
+        weight: 6,
+        opacity: 0.8,
+        dashArray: null,
+        name: '災後最佳路徑'
+      },
+      alternative: {
+        color: '#8b5cf6',
+        weight: 4,
+        opacity: 0.6,
+        dashArray: '10, 5',
+        name: `替代路徑 ${altIndex + 1}`
+      }
+    };
+
+    const style = routeStyles[routeType];
+    
+    // Create route polyline
+    const routeLine = L.polyline(routeCoords, {
+      color: style.color,
+      weight: style.weight,
+      opacity: style.opacity,
+      dashArray: style.dashArray,
+      lineCap: 'round',
+      lineJoin: 'round'
+    });
+
+    // Add route information popup
+    const popupContent = `
+      <div style="font-family: monospace; min-width: 200px;">
+        <strong>🛣️ ${style.name}</strong><br/>
+        <hr style="margin: 8px 0;">
+        <strong>總距離:</strong> ${route.total_distance.toFixed(1)}m<br/>
+        <strong>預計時間:</strong> ${route.estimated_travel_time.toFixed(1)}秒<br/>
+        <strong>車輛類型:</strong> ${route.vehicle_type}<br/>
+        ${route.blocked_roads && route.blocked_roads.length > 0 ? 
+          `<strong>受阻道路:</strong> ${route.blocked_roads.length}條<br/>` : ''
+        }
+        <hr style="margin: 8px 0;">
+        <small style="color: #666;">
+          ${routeType === 'preDisaster' ? '💚 不考慮災害影響的路徑' :
+            routeType === 'postDisaster' ? '🔴 考慮災害影響的路徑' :
+            '🔮 替代路徑選項'}
+        </small>
+      </div>
+    `;
+
+    routeLine.bindPopup(popupContent);
+
+    // Add to appropriate layer
+    if (routeType === 'preDisaster') {
+      this.layers.preDisasterRoute.addLayer(routeLine);
+    } else if (routeType === 'postDisaster') {
+      this.layers.postDisasterRoute.addLayer(routeLine);
+    } else {
+      this.layers.alternativeRoutes.addLayer(routeLine);
+    }
+
+    // Add direction arrows for better visualization
+    this.addRouteDirectionArrows(routeCoords, style.color, routeType);
+  }
+
+  /**
+   * Add direction arrows along route
+   * @param {Array} routeCoords - Route coordinates
+   * @param {string} color - Arrow color
+   * @param {string} routeType - Route type for layer assignment
+   */
+  addRouteDirectionArrows(routeCoords, color, routeType) {
+    if (routeCoords.length < 2) return;
+
+    const arrowInterval = Math.max(1, Math.floor(routeCoords.length / 6)); // Show ~6 arrows per route
+    
+    for (let i = arrowInterval; i < routeCoords.length; i += arrowInterval) {
+      const prevCoord = routeCoords[i - 1];
+      const currCoord = routeCoords[i];
+      
+      // Calculate arrow angle
+      const angle = Math.atan2(currCoord[0] - prevCoord[0], currCoord[1] - prevCoord[1]) * 180 / Math.PI;
+      
+      const arrowIcon = L.divIcon({
+        html: `
+          <div style="
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-bottom: 12px solid ${color};
+            transform: rotate(${angle}deg);
+            opacity: 0.8;
+          "></div>
+        `,
+        className: 'route-arrow',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
+      });
+
+      const arrowMarker = L.marker(currCoord, { icon: arrowIcon });
+      
+      // Add to same layer as route
+      if (routeType === 'preDisaster') {
+        this.layers.preDisasterRoute.addLayer(arrowMarker);
+      } else if (routeType === 'postDisaster') {
+        this.layers.postDisasterRoute.addLayer(arrowMarker);
+      } else {
+        this.layers.alternativeRoutes.addLayer(arrowMarker);
+      }
+    }
+  }
+
+  /**
+   * Add route comparison information overlay
+   * @param {Object} routeStats - Route comparison statistics
+   */
+  addRouteComparisonInfo(routeStats) {
+    const infoContent = `
+      <div style="
+        background: rgba(255, 255, 255, 0.95);
+        padding: 12px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        font-family: monospace;
+        font-size: 12px;
+        min-width: 200px;
+      ">
+        <strong>📊 路徑比較</strong><br/>
+        <hr style="margin: 8px 0;">
+        <strong>距離變化:</strong> ${routeStats.distanceIncrease > 0 ? '+' : ''}${routeStats.distanceIncrease.toFixed(1)}m<br/>
+        <strong>時間變化:</strong> ${routeStats.timeIncrease > 0 ? '+' : ''}${routeStats.timeIncrease.toFixed(1)}秒<br/>
+        <strong>受阻道路:</strong> ${routeStats.blockedRoadsCount}條<br/>
+        ${routeStats.distanceIncreasePercent !== 0 ? 
+          `<strong>距離增加:</strong> ${routeStats.distanceIncreasePercent.toFixed(1)}%<br/>` : ''
+        }
+        ${routeStats.timeIncreasePercent !== 0 ? 
+          `<strong>時間增加:</strong> ${routeStats.timeIncreasePercent.toFixed(1)}%<br/>` : ''
+        }
+      </div>
+    `;
+
+    // Create info control (top-right corner)
+    const infoControl = L.control({ position: 'topright' });
+    infoControl.onAdd = () => {
+      const div = L.DomUtil.create('div', 'route-info-control');
+      div.innerHTML = infoContent;
+      return div;
+    };
+
+    // Remove existing info control if any
+    if (this._routeInfoControl) {
+      this.map.removeControl(this._routeInfoControl);
+    }
+    
+    this._routeInfoControl = infoControl;
+    infoControl.addTo(this.map);
+  }
+
+  /**
+   * Clear all route paths but keep waypoints  
+   */
+  clearRoutePaths() {
+    ['preDisasterRoute', 'postDisasterRoute', 'alternativeRoutes', 'routeInfo'].forEach(layerName => {
+      if (this.layers[layerName]) {
+        this.layers[layerName].clearLayers();
+      }
+    });
+
+    // Remove info control
+    if (this._routeInfoControl) {
+      this.map.removeControl(this._routeInfoControl);
+      this._routeInfoControl = null;
+    }
+  }
+
+  /**
+   * Clear all route-related layers
+   */
+  clearAllRoutes() {
+    ['routeStartMarker', 'routeEndMarker', 'preDisasterRoute', 
+     'postDisasterRoute', 'alternativeRoutes', 'routeInfo'].forEach(layerName => {
+      if (this.layers[layerName]) {
+        this.layers[layerName].clearLayers();
+      }
+    });
+
+    if (this._routeInfoControl) {
+      this.map.removeControl(this._routeInfoControl);
+      this._routeInfoControl = null;
+    }
+
+    this.currentRouteData = null;
+  }
+
+  /**
+   * Toggle route layer visibility
+   * @param {string} layerName - Name of route layer
+   * @param {boolean} visible - Whether layer should be visible
+   */
+  toggleRouteLayer(layerName, visible) {
+    const layer = this.layers[layerName];
+    if (!layer) return;
+
+    if (visible && !this.map.hasLayer(layer)) {
+      this.map.addLayer(layer);
+    } else if (!visible && this.map.hasLayer(layer)) {
+      this.map.removeLayer(layer);
+    }
+
+    // Handle info control visibility
+    if (layerName === 'routeInfo' && this._routeInfoControl) {
+      if (visible) {
+        this._routeInfoControl.addTo(this.map);
+      } else {
+        this.map.removeControl(this._routeInfoControl);
+      }
+    }
+  }
+
+  /**
+   * Get route planning statistics
+   * @returns {Object} - Route statistics 
+   */
+  getRouteStats() {
+    if (!this.currentRouteData) return null;
+
+    const stats = {};
+    
+    if (this.currentRouteData.preDisasterRoute && this.currentRouteData.preDisasterRoute.success) {
+      stats.preDisasterDistance = this.currentRouteData.preDisasterRoute.total_distance;
+      stats.preDisasterTime = this.currentRouteData.preDisasterRoute.estimated_travel_time;
+    }
+
+    if (this.currentRouteData.postDisasterRoute && this.currentRouteData.postDisasterRoute.success) {
+      stats.postDisasterDistance = this.currentRouteData.postDisasterRoute.total_distance;
+      stats.postDisasterTime = this.currentRouteData.postDisasterRoute.estimated_travel_time;
+    }
+
+    if (this.currentRouteData.routeStats) {
+      stats.comparison = this.currentRouteData.routeStats;
+    }
+
+    stats.alternativeCount = this.currentRouteData.alternativeRoutes ? 
+      this.currentRouteData.alternativeRoutes.length : 0;
+
+    return stats;
+  }
+
+  /**
+   * Add click handler for waypoint selection
+   * @param {Function} onMapClick - Callback function for map clicks
+   */
+  setRouteWaypointClickHandler(onMapClick) {
+    if (this.map && onMapClick) {
+      this.map.on('click', (e) => {
+        const { boundary } = this.currentMapData || {};
+        if (!boundary) return;
+
+        const centerX = (boundary.min_x + boundary.max_x) / 2;
+        const centerY = (boundary.min_y + boundary.max_y) / 2;
+        const metersToLat = 1 / 111000;
+        const metersToLng = 1 / 111000;
+
+        // Convert lat/lng back to world coordinates
+        const worldX = centerX + (e.latlng.lng / metersToLng);
+        const worldY = centerY + (e.latlng.lat / metersToLat);
+
+        onMapClick([worldX, worldY], e.latlng);
+      });
+    }
+  }
+
+  /**
+   * Remove click handler for waypoint selection
+   */
+  removeRouteWaypointClickHandler() {
+    if (this.map) {
+      this.map.off('click');
+    }
+  }
+
   /**
    * Destroy map instance and clean up
    */
   destroy() {
+    // Clean up route info control
+    if (this._routeInfoControl && this.map) {
+      this.map.removeControl(this._routeInfoControl);
+      this._routeInfoControl = null;
+    }
+
     if (this.map) {
       this.map.remove();
       this.map = null;
     }
+    
     this.currentMapData = null;
     this.currentDisasterData = null;
+    this.currentRouteData = null;
+    
     this.layers = {
       nodes: null,
       edges: null,
@@ -1221,7 +1718,14 @@ class MapService {
       treeBlockages: null,
       roadObstructions: null,
       servicePath: null,
-      serviceArea: null
+      serviceArea: null,
+      // Route planning layers (SE-2.2)
+      routeStartMarker: null,
+      routeEndMarker: null,
+      preDisasterRoute: null,
+      postDisasterRoute: null,
+      alternativeRoutes: null,
+      routeInfo: null
     };
   }
 }
