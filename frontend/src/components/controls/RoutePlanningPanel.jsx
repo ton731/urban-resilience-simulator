@@ -38,13 +38,13 @@ const RoutePlanningPanel = () => {
     clearRouteError
   } = useSimulationStore();
 
-  // Vehicle type options
+  // Vehicle type options - 只包含后端支持的车辆类型
   const vehicleTypes = [
-    { value: 'car', label: '🚗 汽車 Car', description: '一般私家車' },
-    { value: 'truck', label: '🚛 卡車 Truck', description: '貨運卡車' },
-    { value: 'motorcycle', label: '🏍️ 機車 Motorcycle', description: '摩托車' },
-    { value: 'bicycle', label: '🚲 腳踏車 Bicycle', description: '自行車' },
-    { value: 'emergency', label: '🚑 緊急車輛 Emergency', description: '救護車/消防車' }
+    { value: 'pedestrian', label: '🚶 行人 Pedestrian', description: '步行，最高速度 5 km/h，可使用人行道' },
+    { value: 'motorcycle', label: '🏍️ 摩托車 Motorcycle', description: '摩托车，最高速度 60 km/h，最小道路宽度 1.2m' },
+    { value: 'car', label: '🚗 汽車 Car', description: '一般私家車，最高速度 50 km/h，最小道路宽度 2.2m' },
+    { value: 'ambulance', label: '🚑 救護車 Ambulance', description: '救護車，最高速度 80 km/h，最小道路宽度 3.0m' },
+    { value: 'fire_truck', label: '🚒 消防車 Fire Truck', description: '消防車，最高速度 60 km/h，最小道路宽度 3.5m' }
   ];
 
   const handleCalculateRoute = async () => {

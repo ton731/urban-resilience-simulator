@@ -162,7 +162,7 @@ export const simulationAPI = {
   /**
    * Analyze road network connectivity for a vehicle type
    * @param {string} worldGenerationId - World generation ID
-   * @param {string} vehicleType - Vehicle type (car, truck, motorcycle, etc.)
+   * @param {string} vehicleType - Vehicle type (pedestrian, motorcycle, car, ambulance, fire_truck)
    * @param {string} simulationId - Optional simulation ID for post-disaster analysis
    * @returns {Promise} - Network connectivity analysis
    */

@@ -90,7 +90,7 @@ const useSimulationStore = create((set, get) => ({
   routePlanning: {
     startPoint: null,
     endPoint: null,
-    vehicleType: 'car', // car, truck, motorcycle, bicycle, emergency
+    vehicleType: 'car', // pedestrian, motorcycle, car, ambulance, fire_truck
     isSettingStartPoint: false,
     isSettingEndPoint: false,
     isCalculatingRoute: false,
@@ -558,7 +558,7 @@ const useSimulationStore = create((set, get) => ({
 
   /**
    * Set vehicle type for route planning
-   * @param {string} vehicleType - Vehicle type (car, truck, motorcycle, etc.)
+   * @param {string} vehicleType - Vehicle type (pedestrian, motorcycle, car, ambulance, fire_truck)
    */
   setRouteVehicleType: (vehicleType) => set((state) => ({
     routePlanning: {
