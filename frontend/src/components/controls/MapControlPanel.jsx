@@ -215,11 +215,11 @@ const MapControlPanel = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">主幹道:</span>
-                <span className="font-medium text-red-600">{mapStats.mainRoads}</span>
+                <span className="font-medium text-gray-600">{mapStats.mainRoads}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">次要道路:</span>
-                <span className="font-medium text-blue-600">{mapStats.secondaryRoads}</span>
+                <span className="font-medium text-gray-600">{mapStats.secondaryRoads}</span>
               </div>
               {mapStats.totalTrees > 0 && (
                 <div className="flex justify-between">

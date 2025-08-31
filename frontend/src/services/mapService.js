@@ -230,19 +230,19 @@ class MapService {
       // Create road polygon with actual width
       const roadPolygon = this._createRoadPolygon(fromNode, toNode, edge);
       
-      // Style based on road type and direction
+      // Style based on road type and direction - All roads are now gray
       const roadOptions = {
-        color: isMainRoad ? '#8b0000' : '#00008b', // Darker borders
-        fillColor: isMainRoad ? '#ff4444' : '#4444ff',
+        color: '#666666', // Dark gray borders for all roads
+        fillColor: '#cccccc', // Light gray fill for bidirectional roads
         fillOpacity: 0.7,
         weight: 2,
         opacity: 0.9
       };
 
-      // Different styling for one-way roads
+      // Different styling for one-way roads - darker gray
       if (!edge.is_bidirectional) {
-        roadOptions.fillColor = isMainRoad ? '#ff6666' : '#6666ff';
-        roadOptions.fillOpacity = 0.5;
+        roadOptions.fillColor = '#999999'; // Darker gray for one-way roads
+        roadOptions.fillOpacity = 0.8;
         // Add arrow pattern for one-way roads
         roadOptions.dashArray = '10, 5';
       }
@@ -332,7 +332,7 @@ class MapService {
    */
   _createDirectionArrow(position, angle, isMainRoad) {
     const arrowSize = isMainRoad ? 12 : 8;
-    const arrowColor = isMainRoad ? '#ff0000' : '#0000ff';
+    const arrowColor = isMainRoad ? '#666666' : '#666666'; // Both main and secondary roads use same gray
     
     const arrowIcon = L.divIcon({
       html: `

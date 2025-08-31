@@ -219,22 +219,17 @@ const MapContainer = () => {
       {mapData && (
         <div className="absolute bottom-4 left-4 bg-white p-3 rounded-lg shadow-md text-sm">
           <h4 className="font-medium mb-2">圖例 Legend</h4>
+          <p className="text-xs text-gray-600 mb-2">
+            道路已統一為灰色，單向道路較深色，雙向道路較淺色
+          </p>
           <div className="space-y-1">
             <div className="flex items-center space-x-2">
-              <div className="w-6 h-3 bg-red-400 border border-red-800"></div>
-              <span>主幹道 Main Roads (雙向)</span>
+              <div className="w-6 h-3 bg-gray-400 border border-gray-600"></div>
+              <span>道路 Roads (雙向)</span>
             </div>
             <div className="flex items-center space-x-2">
-              <div className="w-6 h-3 bg-red-300 border border-red-800" style={{ opacity: 0.7, borderStyle: 'dashed' }}></div>
-              <span>主幹道 Main Roads (單向)</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-6 h-3 bg-blue-400 border border-blue-800"></div>
-              <span>次要道路 Secondary Roads (雙向)</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-6 h-3 bg-blue-300 border border-blue-800" style={{ opacity: 0.7, borderStyle: 'dashed' }}></div>
-              <span>次要道路 Secondary Roads (單向)</span>
+              <div className="w-6 h-3 bg-gray-600 border border-gray-600" style={{ opacity: 0.8, borderStyle: 'dashed' }}></div>
+              <span>道路 Roads (單向)</span>
             </div>
             <div className="flex items-center space-x-2">
               <div className="w-3 h-3 bg-orange-400 rounded-full"></div>
@@ -452,6 +447,9 @@ const MapContainer = () => {
               <>
                 <div className="border-t border-gray-300 pt-2 mt-2">
                   <h5 className="font-medium mb-1 text-blue-800">🗺️ 路線規劃結果</h5>
+                  <p className="text-xs text-gray-600 mb-2">
+                    注意：所有道路現在都是灰色，路徑會以綠色(災前)和紅色(災後)清楚顯示
+                  </p>
                 </div>
                 {(routePlanning.startPoint || routePlanning.endPoint) && (
                   <>
@@ -495,7 +493,7 @@ const MapContainer = () => {
                       background: '#10b981',
                       borderRadius: '2px'
                     }}></div>
-                    <span>災前路徑 Pre-disaster Route</span>
+                    <span>災前路徑 Pre-disaster Route (綠色)</span>
                   </div>
                 )}
                 {routePlanning.postDisasterRoute?.success && (
@@ -506,7 +504,7 @@ const MapContainer = () => {
                       background: '#ef4444',
                       borderRadius: '2px'
                     }}></div>
-                    <span>災後路徑 Post-disaster Route</span>
+                    <span>災後路徑 Post-disaster Route (紅色)</span>
                   </div>
                 )}
                 {routePlanning.alternativeRoutes?.length > 0 && (

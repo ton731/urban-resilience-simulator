@@ -316,7 +316,7 @@ const RoutePlanningPanel = () => {
                     />
                     <span className="ml-2 text-sm text-gray-700">
                       <span className="inline-block w-3 h-3 bg-green-500 rounded mr-1"></span>
-                      災前路徑
+                      災前路徑 (綠色)
                     </span>
                   </label>
                 )}
@@ -332,7 +332,7 @@ const RoutePlanningPanel = () => {
                     />
                     <span className="ml-2 text-sm text-gray-700">
                       <span className="inline-block w-3 h-3 bg-red-500 rounded mr-1"></span>
-                      災後路徑
+                      災後路徑 (紅色)
                     </span>
                   </label>
                 )}
