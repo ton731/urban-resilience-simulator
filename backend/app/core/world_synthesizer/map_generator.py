@@ -157,6 +157,7 @@ class MapGenerator:
         # Generate road network
         self._generate_main_roads(generated_map)
         self._generate_secondary_roads(generated_map)
+        self._create_intersection_nodes(generated_map)
         self._build_network_graph(generated_map)
         
         # Generate trees along roads (WS-1.2)
@@ -416,6 +417,134 @@ class MapGenerator:
                 )
         
         map_data.graph = graph
+    
+    def _create_intersection_nodes(self, map_data: GeneratedMap) -> None:
+        """
+        Detect road intersections and create nodes at intersection points.
+        This solves the problem where main roads and secondary roads cross
+        but have no node at the intersection for turning.
+        """
+        # Get all road edges as LineString geometries
+        road_lines = {}  # edge_id -> (LineString, edge_data)
+        
+        for edge_id, edge in map_data.edges.items():
+            from_node = map_data.nodes[edge.from_node]
+            to_node = map_data.nodes[edge.to_node]
+            
+            line = LineString([(from_node.x, from_node.y), (to_node.x, to_node.y)])
+            road_lines[edge_id] = (line, edge)
+        
+        # Find all intersection points
+        intersection_points = {}  # (x, y) -> list of edge_ids that intersect here
+        processed_pairs = set()
+        
+        for edge_id1, (line1, edge1) in road_lines.items():
+            for edge_id2, (line2, edge2) in road_lines.items():
+                if edge_id1 >= edge_id2:  # Avoid duplicate comparisons
+                    continue
+                
+                pair_key = (min(edge_id1, edge_id2), max(edge_id1, edge_id2))
+                if pair_key in processed_pairs:
+                    continue
+                processed_pairs.add(pair_key)
+                
+                # Skip if they share a node (already connected)
+                if (edge1.from_node in [edge2.from_node, edge2.to_node] or 
+                    edge1.to_node in [edge2.from_node, edge2.to_node]):
+                    continue
+                
+                # Check for intersection
+                if line1.intersects(line2):
+                    intersection = line1.intersection(line2)
+                    
+                    # Only handle point intersections (not overlapping segments)
+                    if intersection.geom_type == 'Point':
+                        x, y = intersection.x, intersection.y
+                        
+                        # Round to avoid floating point precision issues
+                        point_key = (round(x, 2), round(y, 2))
+                        
+                        if point_key not in intersection_points:
+                            intersection_points[point_key] = []
+                        
+                        intersection_points[point_key].extend([edge_id1, edge_id2])
+        
+        # Create nodes at intersection points and split edges
+        for (x, y), intersecting_edges in intersection_points.items():
+            # Remove duplicates
+            intersecting_edges = list(set(intersecting_edges))
+            
+            if len(intersecting_edges) < 2:
+                continue
+            
+            # Create intersection node
+            intersection_node_id = str(uuid.uuid4())
+            intersection_node = MapNode(
+                id=intersection_node_id,
+                x=float(x),
+                y=float(y),
+                node_type="intersection"
+            )
+            
+            map_data.nodes[intersection_node_id] = intersection_node
+            
+            # Split each intersecting edge at the intersection point
+            edges_to_remove = []
+            new_edges = []
+            
+            for edge_id in intersecting_edges:
+                if edge_id not in map_data.edges:
+                    continue  # Edge might have been processed already
+                    
+                original_edge = map_data.edges[edge_id]
+                from_node = map_data.nodes[original_edge.from_node]
+                to_node = map_data.nodes[original_edge.to_node]
+                
+                # Calculate distances to determine if intersection is actually on the edge
+                from_dist = math.sqrt((x - from_node.x)**2 + (y - from_node.y)**2)
+                to_dist = math.sqrt((x - to_node.x)**2 + (y - to_node.y)**2)
+                total_dist = math.sqrt((to_node.x - from_node.x)**2 + (to_node.y - from_node.y)**2)
+                
+                # Only split if intersection is actually between the nodes (not at endpoints)
+                tolerance = 5.0  # meters
+                if (from_dist > tolerance and to_dist > tolerance and 
+                    abs(from_dist + to_dist - total_dist) < tolerance):
+                    
+                    # Create two new edges: from_node -> intersection and intersection -> to_node
+                    edge1_id = str(uuid.uuid4())
+                    edge2_id = str(uuid.uuid4())
+                    
+                    edge1 = RoadEdge(
+                        id=edge1_id,
+                        from_node=original_edge.from_node,
+                        to_node=intersection_node_id,
+                        width=original_edge.width,
+                        lanes=original_edge.lanes,
+                        is_bidirectional=original_edge.is_bidirectional,
+                        road_type=original_edge.road_type,
+                        speed_limit=original_edge.speed_limit
+                    )
+                    
+                    edge2 = RoadEdge(
+                        id=edge2_id,
+                        from_node=intersection_node_id,
+                        to_node=original_edge.to_node,
+                        width=original_edge.width,
+                        lanes=original_edge.lanes,
+                        is_bidirectional=original_edge.is_bidirectional,
+                        road_type=original_edge.road_type,
+                        speed_limit=original_edge.speed_limit
+                    )
+                    
+                    new_edges.extend([edge1, edge2])
+                    edges_to_remove.append(edge_id)
+            
+            # Apply edge modifications
+            for edge_id in edges_to_remove:
+                del map_data.edges[edge_id]
+            
+            for edge in new_edges:
+                map_data.edges[edge.id] = edge
     
     def _generate_trees(self, map_data: GeneratedMap) -> None:
         """
