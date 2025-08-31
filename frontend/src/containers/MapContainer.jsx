@@ -52,6 +52,9 @@ const MapContainer = () => {
         console.log('🗺️ Updating map with new data...');
         mapService.updateMapData(mapData);
         console.log('✅ Map updated successfully');
+        
+        // Clear previous route data when new map is loaded
+        mapService.clearAllRoutes();
       } catch (error) {
         console.error('❌ Failed to update map:', error);
       }

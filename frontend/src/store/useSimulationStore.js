@@ -180,6 +180,9 @@ const useSimulationStore = create((set, get) => ({
         error: null
       });
 
+      // Clear previous route planning data when generating new world
+      get().clearRoutePoints();
+
       console.log('✅ World generation completed:', mapStats);
       return mapData;
       
