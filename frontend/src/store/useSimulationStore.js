@@ -173,7 +173,10 @@ const useSimulationStore = create((set, get) => ({
         generationId: mapData.generation_id,
         treeStats: mapData.tree_stats || null,
         facilityStats: mapData.facility_stats || null,
-        populationStats: mapData.population_stats || null
+        populationStats: mapData.population_stats || null,
+        buildingsByType: mapData.building_stats?.by_type || null,
+        totalPopulation: mapData.population_stats?.total_population || 0,
+        populationDensity: mapData.population_stats?.population_density || 0
       };
 
       set({ 
