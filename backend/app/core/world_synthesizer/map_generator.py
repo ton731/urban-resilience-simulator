@@ -173,6 +173,9 @@ class MapGenerator:
 
         self._generate_secondary_roads(generated_map)
 
+        # Generate 1-2 diagonal main roads (after basic road network is complete)
+        self._generate_diagonal_main_roads(generated_map)
+
         self._create_intersection_nodes(generated_map)
 
         self._build_network_graph(generated_map)
@@ -270,6 +273,81 @@ class MapGenerator:
             )
 
             map_data.edges[edge_id] = road_edge
+    
+    def _generate_diagonal_main_roads(self, map_data: GeneratedMap) -> None:
+        """
+        Generate 1-2 diagonal main roads across the map.
+        Angles are between 20-45 degrees to avoid being too close to horizontal/vertical.
+        """
+        boundary = map_data.boundary
+        
+        # Generate 1-2 diagonal roads
+        num_diagonal_roads = random.randint(1, 2)
+        
+        for _ in range(num_diagonal_roads):
+            # Random angle between 20-45 degrees (choose from 4 quadrants)
+            base_angles = [30, 150, 210, 330]  # 30°, 150°, 210°, 330°
+            angle_degrees = random.choice(base_angles) + random.uniform(-10, 10)  # ±10° variation
+            angle_radians = math.radians(angle_degrees)
+            
+            # Calculate direction vector
+            dx = math.cos(angle_radians)
+            dy = math.sin(angle_radians)
+            
+            # Start from one corner of the map and extend across
+            if angle_degrees < 90 or angle_degrees > 270:  # Going right
+                start_x = boundary.min_x
+                start_y = boundary.min_y + random.uniform(0.3, 0.7) * boundary.height
+            else:  # Going left
+                start_x = boundary.max_x
+                start_y = boundary.min_y + random.uniform(0.3, 0.7) * boundary.height
+            
+            # Calculate road length that crosses the map
+            if abs(dx) > abs(dy):  # More horizontal
+                road_length = boundary.width / abs(dx)
+            else:  # More vertical
+                road_length = boundary.height / abs(dy)
+            
+            # Extend slightly beyond map boundaries
+            road_length *= 1.2
+            
+            end_x = start_x + dx * road_length
+            end_y = start_y + dy * road_length
+            
+            # Create start and end nodes
+            start_node_id = str(uuid.uuid4())
+            end_node_id = str(uuid.uuid4())
+            
+            start_node = MapNode(
+                id=start_node_id,
+                x=start_x,
+                y=start_y,
+                node_type="intersection"
+            )
+            
+            end_node = MapNode(
+                id=end_node_id,
+                x=end_x,
+                y=end_y,
+                node_type="intersection"
+            )
+            
+            map_data.nodes[start_node_id] = start_node
+            map_data.nodes[end_node_id] = end_node
+            
+            # Create road edge
+            edge_id = str(uuid.uuid4())
+            road_edge = RoadEdge(
+                id=edge_id,
+                from_node=start_node_id,
+                to_node=end_node_id,
+                width=self.main_road_width,
+                lanes=self.main_road_lanes,
+                road_type="main",
+                speed_limit=70.0,
+            )
+            
+            map_data.edges[edge_id] = road_edge
 
     def _generate_secondary_roads(self, map_data: GeneratedMap) -> None:
         """
@@ -280,28 +358,32 @@ class MapGenerator:
         """
         boundary = map_data.boundary
         
-        # First, identify all main road positions
-        main_road_x_positions = []
-        main_road_y_positions = []
+        # Find only straight main roads (exclude diagonal ones for block calculation)
+        straight_main_road_x_positions = []
+        straight_main_road_y_positions = []
         
-        for node in map_data.nodes.values():
-            # Find nodes that are part of main roads
-            connected_main_roads = []
-            for edge in map_data.edges.values():
-                if edge.road_type == "main" and (edge.from_node == node.id or edge.to_node == node.id):
-                    connected_main_roads.append(edge)
-            
-            if connected_main_roads:
-                if node.x not in main_road_x_positions:
-                    main_road_x_positions.append(node.x)
-                if node.y not in main_road_y_positions:
-                    main_road_y_positions.append(node.y)
+        for edge in map_data.edges.values():
+            if edge.road_type == "main":
+                from_node = map_data.nodes[edge.from_node]
+                to_node = map_data.nodes[edge.to_node]
+                
+                # Check if this is a straight vertical road
+                if abs(from_node.x - to_node.x) < 50:  # Almost vertical
+                    x_pos = (from_node.x + to_node.x) / 2
+                    if x_pos not in straight_main_road_x_positions:
+                        straight_main_road_x_positions.append(x_pos)
+                
+                # Check if this is a straight horizontal road
+                if abs(from_node.y - to_node.y) < 50:  # Almost horizontal
+                    y_pos = (from_node.y + to_node.y) / 2
+                    if y_pos not in straight_main_road_y_positions:
+                        straight_main_road_y_positions.append(y_pos)
         
-        main_road_x_positions.sort()
-        main_road_y_positions.sort()
+        straight_main_road_x_positions.sort()
+        straight_main_road_y_positions.sort()
         
-        # Generate alleys within each block
-        self._generate_alleys_in_blocks(map_data, main_road_x_positions, main_road_y_positions)
+        # Generate alleys within blocks formed by straight main roads only
+        self._generate_alleys_in_blocks(map_data, straight_main_road_x_positions, straight_main_road_y_positions)
 
     def _generate_alleys_in_blocks(self, map_data: GeneratedMap, x_positions: List[float], y_positions: List[float]) -> None:
         """
@@ -345,26 +427,62 @@ class MapGenerator:
         is_bidirectional = random.random() > 0.3  # 70% chance bidirectional
         
         if is_full_length:
-            # Full-length alley: spans from left main road to right main road
-            start_x = block_left
-            end_x = block_right
+            # Full-length alley: must connect to actual main road nodes
+            start_node = self._find_closest_main_road_node(map_data, block_left, alley_y)
+            end_node = self._find_closest_main_road_node(map_data, block_right, alley_y)
+            
+            if start_node and end_node:
+                start_x, start_y = start_node.x, start_node.y
+                end_x, end_y = end_node.x, end_node.y
+            else:
+                # Fallback to block boundaries
+                start_x, end_x = block_left, block_right
+                start_y = end_y = alley_y
         else:
-            # Partial-length alley: extends from one side into the block
+            # Partial-length alley: extends from one main road into the block
             if random.random() < 0.5:
                 # Extend from left main road
-                start_x = block_left
+                start_node = self._find_closest_main_road_node(map_data, block_left, alley_y)
+                start_x = start_node.x if start_node else block_left
+                start_y = start_node.y if start_node else alley_y
                 end_x = block_left + random.uniform(0.3, 0.8) * (block_right - block_left)
+                end_y = alley_y
             else:
                 # Extend from right main road
-                end_x = block_right
+                end_node = self._find_closest_main_road_node(map_data, block_right, alley_y)
+                end_x = end_node.x if end_node else block_right
+                end_y = end_node.y if end_node else alley_y
                 start_x = block_right - random.uniform(0.3, 0.8) * (block_right - block_left)
+                start_y = alley_y
         
-        # Create start and end nodes
+        # 20% chance to add slight tilt (up to 30 degrees)
+        if random.random() < 0.2 and not is_full_length:  # Only tilt partial alleys
+            max_tilt_angle = math.radians(30)  # Convert to radians
+            tilt_angle = random.uniform(-max_tilt_angle, max_tilt_angle)
+            
+            # Calculate Y offset based on X distance and tilt angle
+            x_distance = end_x - start_x
+            y_offset = x_distance * math.tan(tilt_angle)
+            
+            # Ensure tilted alley stays within block boundaries
+            if end_y + y_offset > block_top:
+                y_offset = block_top - end_y - 10  # Small buffer
+            elif end_y + y_offset < block_bottom:
+                y_offset = block_bottom - end_y + 10  # Small buffer
+            
+            end_y = end_y + y_offset
+        
+        # Check if road would have zero length (avoid NaN in frontend)
+        road_length = math.sqrt((end_x - start_x) ** 2 + (end_y - start_y) ** 2)
+        if road_length < 5:  # Minimum 5 meters
+            return  # Skip this alley
+        
+        # Always create new nodes for alleys to avoid same node issues
         start_node_id = str(uuid.uuid4())
         end_node_id = str(uuid.uuid4())
         
-        start_node = MapNode(id=start_node_id, x=start_x, y=alley_y, node_type="intersection")
-        end_node = MapNode(id=end_node_id, x=end_x, y=alley_y, node_type="intersection")
+        start_node = MapNode(id=start_node_id, x=start_x, y=start_y, node_type="intersection")
+        end_node = MapNode(id=end_node_id, x=end_x, y=end_y, node_type="intersection")
         
         map_data.nodes[start_node_id] = start_node
         map_data.nodes[end_node_id] = end_node
@@ -394,26 +512,62 @@ class MapGenerator:
         is_bidirectional = random.random() > 0.3  # 70% chance bidirectional
         
         if is_full_length:
-            # Full-length alley: spans from bottom main road to top main road
-            start_y = block_bottom
-            end_y = block_top
+            # Full-length alley: must connect to actual main road nodes
+            start_node = self._find_closest_main_road_node(map_data, alley_x, block_bottom)
+            end_node = self._find_closest_main_road_node(map_data, alley_x, block_top)
+            
+            if start_node and end_node:
+                start_x, start_y = start_node.x, start_node.y
+                end_x, end_y = end_node.x, end_node.y
+            else:
+                # Fallback to block boundaries
+                start_x = end_x = alley_x
+                start_y, end_y = block_bottom, block_top
         else:
-            # Partial-length alley: extends from one side into the block
+            # Partial-length alley: extends from one main road into the block
             if random.random() < 0.5:
                 # Extend from bottom main road
-                start_y = block_bottom
+                start_node = self._find_closest_main_road_node(map_data, alley_x, block_bottom)
+                start_x = start_node.x if start_node else alley_x
+                start_y = start_node.y if start_node else block_bottom
+                end_x = alley_x
                 end_y = block_bottom + random.uniform(0.3, 0.8) * (block_top - block_bottom)
             else:
                 # Extend from top main road
-                end_y = block_top
+                end_node = self._find_closest_main_road_node(map_data, alley_x, block_top)
+                end_x = end_node.x if end_node else alley_x
+                end_y = end_node.y if end_node else block_top
+                start_x = alley_x
                 start_y = block_top - random.uniform(0.3, 0.8) * (block_top - block_bottom)
         
-        # Create start and end nodes
+        # 20% chance to add slight tilt (up to 30 degrees)
+        if random.random() < 0.2 and not is_full_length:  # Only tilt partial alleys
+            max_tilt_angle = math.radians(30)  # Convert to radians
+            tilt_angle = random.uniform(-max_tilt_angle, max_tilt_angle)
+            
+            # Calculate X offset based on Y distance and tilt angle
+            y_distance = end_y - start_y
+            x_offset = y_distance * math.tan(tilt_angle)
+            
+            # Ensure tilted alley stays within block boundaries
+            if end_x + x_offset > block_right:
+                x_offset = block_right - end_x - 10  # Small buffer
+            elif end_x + x_offset < block_left:
+                x_offset = block_left - end_x + 10  # Small buffer
+            
+            end_x = end_x + x_offset
+        
+        # Check if road would have zero length (avoid NaN in frontend)
+        road_length = math.sqrt((end_x - start_x) ** 2 + (end_y - start_y) ** 2)
+        if road_length < 5:  # Minimum 5 meters
+            return  # Skip this alley
+        
+        # Always create new nodes for alleys to avoid same node issues  
         start_node_id = str(uuid.uuid4())
         end_node_id = str(uuid.uuid4())
         
-        start_node = MapNode(id=start_node_id, x=alley_x, y=start_y, node_type="intersection")
-        end_node = MapNode(id=end_node_id, x=alley_x, y=end_y, node_type="intersection")
+        start_node = MapNode(id=start_node_id, x=start_x, y=start_y, node_type="intersection")
+        end_node = MapNode(id=end_node_id, x=end_x, y=end_y, node_type="intersection")
         
         map_data.nodes[start_node_id] = start_node
         map_data.nodes[end_node_id] = end_node
@@ -432,6 +586,28 @@ class MapGenerator:
         )
         
         map_data.edges[edge_id] = road_edge
+    
+    def _find_closest_main_road_node(self, map_data: GeneratedMap, x: float, y: float) -> MapNode:
+        """Find the closest node that belongs to a main road."""
+        closest_node = None
+        min_distance = float('inf')
+        
+        for node in map_data.nodes.values():
+            # Check if this node is connected to any main road
+            is_main_road_node = False
+            for edge in map_data.edges.values():
+                if (edge.road_type == "main" and 
+                    (edge.from_node == node.id or edge.to_node == node.id)):
+                    is_main_road_node = True
+                    break
+            
+            if is_main_road_node:
+                distance = math.sqrt((node.x - x) ** 2 + (node.y - y) ** 2)
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_node = node
+        
+        return closest_node
 
     def _find_nearby_node(
         self, map_data: GeneratedMap, x: float, y: float, threshold: float = 50.0
@@ -594,6 +770,21 @@ class MapGenerator:
 
             # Create new edges for each segment
             for i, (segment_from, segment_to) in enumerate(segments):
+                # Skip zero-length segments
+                if segment_from == segment_to:
+                    continue
+                    
+                # Check if nodes have same coordinates
+                from_node_obj = map_data.nodes[segment_from]
+                to_node_obj = map_data.nodes[segment_to]
+                segment_length = math.sqrt(
+                    (to_node_obj.x - from_node_obj.x) ** 2 + 
+                    (to_node_obj.y - from_node_obj.y) ** 2
+                )
+                
+                if segment_length < 5:  # Skip very short segments
+                    continue
+                
                 new_edge_id = str(uuid.uuid4())
                 new_edge = RoadEdge(
                     id=new_edge_id,
