@@ -764,7 +764,7 @@ class MapService {
     if (sideLength >= 10) { // Only show icon for buildings >= 10m side length
       // Calculate icon size more proportionally to building size
       // For buildings 10-50m: icon size ranges from 16px to 48px
-      const iconSize = Math.min(48, Math.max(16, sideLength * 1.2)); // Icon size based on building size
+      const iconSize = Math.min(60, Math.max(24, sideLength * 1.8)); // Icon size based on building size
       
       const centerIcon = L.marker(position, {
         icon: L.divIcon({
