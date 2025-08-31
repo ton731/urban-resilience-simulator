@@ -253,15 +253,6 @@ async def find_path(request: PathfindingRequest):
             except Exception as e:
                 logger.warning(f"Could not find alternative routes: {str(e)}")
 
-        print(
-            PathfindingResponse(
-                success=result.success,
-                path_coordinates=result.path_coordinates,
-                path_node_ids=result.path_node_ids,
-            )
-        )
-        print()
-
         return PathfindingResponse(
             success=result.success,
             path_coordinates=result.path_coordinates,

@@ -155,10 +155,18 @@ class MapGenerator:
         generated_map = GeneratedMap(boundary=boundary)
         
         # Generate road network
+        print(f"DEBUG: Starting road network generation...")
         self._generate_main_roads(generated_map)
+        print(f"DEBUG: After main roads: {len(generated_map.nodes)} nodes, {len(generated_map.edges)} edges")
+        
         self._generate_secondary_roads(generated_map)
+        print(f"DEBUG: After secondary roads: {len(generated_map.nodes)} nodes, {len(generated_map.edges)} edges")
+        
         self._create_intersection_nodes(generated_map)
+        print(f"DEBUG: After intersection creation: {len(generated_map.nodes)} nodes, {len(generated_map.edges)} edges")
+        
         self._build_network_graph(generated_map)
+        print(f"DEBUG: Final graph built with {generated_map.graph.number_of_nodes()} nodes, {generated_map.graph.number_of_edges()} edges")
         
         # Generate trees along roads (WS-1.2)
         if include_trees:
@@ -421,32 +429,35 @@ class MapGenerator:
     def _create_intersection_nodes(self, map_data: GeneratedMap) -> None:
         """
         Detect road intersections and create nodes at intersection points.
-        This solves the problem where main roads and secondary roads cross
-        but have no node at the intersection for turning.
+        This uses a completely rewritten approach that ensures proper connectivity.
         """
+        print(f"DEBUG: Starting intersection detection with {len(map_data.edges)} edges")
+        
+        # Store original edges before any modifications
+        original_edges = dict(map_data.edges)
+        
         # Get all road edges as LineString geometries
         road_lines = {}  # edge_id -> (LineString, edge_data)
         
-        for edge_id, edge in map_data.edges.items():
+        for edge_id, edge in original_edges.items():
             from_node = map_data.nodes[edge.from_node]
             to_node = map_data.nodes[edge.to_node]
             
             line = LineString([(from_node.x, from_node.y), (to_node.x, to_node.y)])
             road_lines[edge_id] = (line, edge)
+            
+        print(f"DEBUG: Created {len(road_lines)} road line geometries")
         
         # Find all intersection points
         intersection_points = {}  # (x, y) -> list of edge_ids that intersect here
-        processed_pairs = set()
+        edge_intersections = {}  # edge_id -> list of (x, y) intersection points on this edge
         
         for edge_id1, (line1, edge1) in road_lines.items():
+            edge_intersections[edge_id1] = []
+            
             for edge_id2, (line2, edge2) in road_lines.items():
                 if edge_id1 >= edge_id2:  # Avoid duplicate comparisons
                     continue
-                
-                pair_key = (min(edge_id1, edge_id2), max(edge_id1, edge_id2))
-                if pair_key in processed_pairs:
-                    continue
-                processed_pairs.add(pair_key)
                 
                 # Skip if they share a node (already connected)
                 if (edge1.from_node in [edge2.from_node, edge2.to_node] or 
@@ -464,20 +475,24 @@ class MapGenerator:
                         # Round to avoid floating point precision issues
                         point_key = (round(x, 2), round(y, 2))
                         
+                        # Store intersection for both edges
+                        edge_intersections[edge_id1].append(point_key)
+                        if edge_id2 not in edge_intersections:
+                            edge_intersections[edge_id2] = []
+                        edge_intersections[edge_id2].append(point_key)
+                        
                         if point_key not in intersection_points:
                             intersection_points[point_key] = []
                         
                         intersection_points[point_key].extend([edge_id1, edge_id2])
         
-        # Create nodes at intersection points and split edges
-        for (x, y), intersecting_edges in intersection_points.items():
-            # Remove duplicates
-            intersecting_edges = list(set(intersecting_edges))
-            
-            if len(intersecting_edges) < 2:
-                continue
-            
-            # Create intersection node
+        print(f"DEBUG: Found {len(intersection_points)} intersection points")
+        for i, ((x, y), edges) in enumerate(intersection_points.items()):
+            print(f"DEBUG: Intersection {i+1} at ({x:.1f}, {y:.1f}) affects edges: {list(set(edges))}")
+        
+        # Create intersection nodes first
+        intersection_nodes = {}  # (x, y) -> node_id
+        for (x, y) in intersection_points.keys():
             intersection_node_id = str(uuid.uuid4())
             intersection_node = MapNode(
                 id=intersection_node_id,
@@ -485,66 +500,69 @@ class MapGenerator:
                 y=float(y),
                 node_type="intersection"
             )
-            
             map_data.nodes[intersection_node_id] = intersection_node
-            
-            # Split each intersecting edge at the intersection point
-            edges_to_remove = []
-            new_edges = []
-            
-            for edge_id in intersecting_edges:
-                if edge_id not in map_data.edges:
-                    continue  # Edge might have been processed already
-                    
-                original_edge = map_data.edges[edge_id]
-                from_node = map_data.nodes[original_edge.from_node]
-                to_node = map_data.nodes[original_edge.to_node]
+            intersection_nodes[(x, y)] = intersection_node_id
+            print(f"DEBUG: Created intersection node {intersection_node_id[:8]}... at ({x:.1f}, {y:.1f})")
+        
+        # Now process each edge that has intersections
+        for edge_id, intersections in edge_intersections.items():
+            if not intersections or edge_id not in original_edges:
+                continue
                 
-                # Calculate distances to determine if intersection is actually on the edge
-                from_dist = math.sqrt((x - from_node.x)**2 + (y - from_node.y)**2)
-                to_dist = math.sqrt((x - to_node.x)**2 + (y - to_node.y)**2)
-                total_dist = math.sqrt((to_node.x - from_node.x)**2 + (to_node.y - from_node.y)**2)
-                
-                # Only split if intersection is actually between the nodes (not at endpoints)
-                tolerance = 5.0  # meters
-                if (from_dist > tolerance and to_dist > tolerance and 
-                    abs(from_dist + to_dist - total_dist) < tolerance):
-                    
-                    # Create two new edges: from_node -> intersection and intersection -> to_node
-                    edge1_id = str(uuid.uuid4())
-                    edge2_id = str(uuid.uuid4())
-                    
-                    edge1 = RoadEdge(
-                        id=edge1_id,
-                        from_node=original_edge.from_node,
-                        to_node=intersection_node_id,
-                        width=original_edge.width,
-                        lanes=original_edge.lanes,
-                        is_bidirectional=original_edge.is_bidirectional,
-                        road_type=original_edge.road_type,
-                        speed_limit=original_edge.speed_limit
-                    )
-                    
-                    edge2 = RoadEdge(
-                        id=edge2_id,
-                        from_node=intersection_node_id,
-                        to_node=original_edge.to_node,
-                        width=original_edge.width,
-                        lanes=original_edge.lanes,
-                        is_bidirectional=original_edge.is_bidirectional,
-                        road_type=original_edge.road_type,
-                        speed_limit=original_edge.speed_limit
-                    )
-                    
-                    new_edges.extend([edge1, edge2])
-                    edges_to_remove.append(edge_id)
+            print(f"DEBUG: Processing edge {edge_id[:8]}... with {len(intersections)} intersection points")
             
-            # Apply edge modifications
-            for edge_id in edges_to_remove:
+            original_edge = original_edges[edge_id]
+            from_node = map_data.nodes[original_edge.from_node]
+            to_node = map_data.nodes[original_edge.to_node]
+            
+            # Sort intersections by distance along the edge
+            edge_line = LineString([(from_node.x, from_node.y), (to_node.x, to_node.y)])
+            intersections_with_distance = []
+            
+            for (x, y) in intersections:
+                point_on_line = Point(x, y)
+                distance = edge_line.project(point_on_line)
+                intersections_with_distance.append((distance, (x, y)))
+            
+            intersections_with_distance.sort()  # Sort by distance along edge
+            
+            # Create segments: from_node -> intersection1 -> intersection2 -> ... -> to_node
+            segments = []
+            current_from = original_edge.from_node
+            
+            for distance, (x, y) in intersections_with_distance:
+                intersection_node_id = intersection_nodes[(x, y)]
+                segments.append((current_from, intersection_node_id))
+                current_from = intersection_node_id
+            
+            # Final segment to end node
+            segments.append((current_from, original_edge.to_node))
+            
+            print(f"DEBUG: Creating {len(segments)} segments for edge {edge_id[:8]}...")
+            
+            # Remove original edge
+            if edge_id in map_data.edges:
                 del map_data.edges[edge_id]
+                print(f"DEBUG: Removed original edge {edge_id[:8]}...")
             
-            for edge in new_edges:
-                map_data.edges[edge.id] = edge
+            # Create new edges for each segment
+            for i, (segment_from, segment_to) in enumerate(segments):
+                new_edge_id = str(uuid.uuid4())
+                new_edge = RoadEdge(
+                    id=new_edge_id,
+                    from_node=segment_from,
+                    to_node=segment_to,
+                    width=original_edge.width,
+                    lanes=original_edge.lanes,
+                    is_bidirectional=original_edge.is_bidirectional,
+                    road_type=original_edge.road_type,
+                    speed_limit=original_edge.speed_limit
+                )
+                
+                map_data.edges[new_edge_id] = new_edge
+                print(f"DEBUG: Created segment {i+1}: {new_edge_id[:8]}... from {segment_from[:8]}... to {segment_to[:8]}...")
+        
+        print(f"DEBUG: Intersection processing complete")
     
     def _generate_trees(self, map_data: GeneratedMap) -> None:
         """
