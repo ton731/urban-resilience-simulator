@@ -26,14 +26,25 @@ const MapPage = () => {
     <div className="h-screen flex flex-col bg-gray-50">
       
       {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
+      <header className="bg-white border-b border-gray-200 px-6 py-4">
+        <div className="flex items-center">
+          {/* Back to Generate Button */}
+          <Button
+            onClick={() => navigate('/generate')}
+            variant="secondary"
+            size="medium"
+            className="mr-6"
+          >
+            ← 返回生成設定
+          </Button>
+          
+          {/* Title */}
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
+            <h1 className="text-xl font-semibold text-gray-900">
               城市韌性模擬平台
             </h1>
-            <p className="text-sm text-gray-600 mt-1">
-              Urban Resilience Simulation Platform - 地圖檢視與模擬
+            <p className="text-sm text-gray-600">
+              地圖檢視與模擬
             </p>
           </div>
         </div>
@@ -53,7 +64,7 @@ const MapPage = () => {
       {/* Error Display */}
       {error && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-50">
-          <Card className="border-red-200 bg-red-50 shadow-lg">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-medium text-red-800">錯誤</h4>
@@ -67,7 +78,7 @@ const MapPage = () => {
                 ✕
               </Button>
             </div>
-          </Card>
+          </div>
         </div>
       )}
 

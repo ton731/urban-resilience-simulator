@@ -1,57 +1,22 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import useSimulationStore from '../../store/useSimulationStore';
-import Button from '../ui/Button';
 import Card from '../ui/Card';
 import DisasterSimulationPanel from './DisasterSimulationPanel';
 import RoutePlanningPanel from './RoutePlanningPanel';
 
 const MapControlPanel = () => {
-  const navigate = useNavigate();
   const {
     layerVisibility,
     mapStats,
-    clearMapData,
     toggleLayer,
     toggleTreeVulnerability,
     toggleBuildings,
     toggleBuildingType
   } = useSimulationStore();
 
-  const handleBackToGenerate = () => {
-    navigate('/generate');
-  };
-
-  const handleRegenerateMap = () => {
-    clearMapData();
-    navigate('/generate');
-  };
-
   return (
     <div className="w-80 bg-gray-50 p-4 overflow-y-auto">
       <div className="space-y-4">
-        
-        {/* Navigation Controls */}
-        <Card title="導航控制 (Navigation)">
-          <div className="space-y-2">
-            <Button
-              onClick={handleBackToGenerate}
-              variant="secondary"
-              size="medium"
-              className="w-full"
-            >
-              ← 返回設定
-            </Button>
-            <Button
-              onClick={handleRegenerateMap}
-              variant="primary"
-              size="medium"
-              className="w-full"
-            >
-              🔄 重新生成地圖
-            </Button>
-          </div>
-        </Card>
 
         {/* Layer Controls */}
         <Card title="圖層控制 (Layer Controls)">
