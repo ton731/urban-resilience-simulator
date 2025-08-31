@@ -15,6 +15,7 @@ from app.schemas.response import (
     ErrorResponse
 )
 from app.core.world_synthesizer.map_generator import MapGenerator
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -66,13 +67,13 @@ async def generate_world(request: WorldGenerationRequest):
             # Tree generation parameters (WS-1.2)
             "tree_spacing": request.tree_spacing,
             "tree_max_offset": request.tree_max_offset,
-            "tree_road_buffer": 3.0,  # From config
-            "tree_height_range": [4.0, 25.0],  # From config
-            "tree_trunk_width_range": [0.2, 1.5],  # From config
+            "tree_road_buffer": settings.DEFAULT_TREE_ROAD_BUFFER,
+            "tree_height_range": settings.DEFAULT_TREE_HEIGHT_RANGE,
+            "tree_trunk_width_range": settings.DEFAULT_TREE_TRUNK_WIDTH_RANGE,
             # Building generation parameters (WS-1.5)
-            "building_density": getattr(request, 'building_density', 0.3),
-            "min_building_distance": 25.0,
-            "road_buffer_distance": 15.0
+            "building_density": getattr(request, 'building_density', settings.DEFAULT_BUILDING_DENSITY),
+            "min_building_distance": settings.DEFAULT_MIN_BUILDING_DISTANCE,
+            "road_buffer_distance": settings.DEFAULT_ROAD_BUFFER_DISTANCE
         }
         
         # Set vulnerability distribution
@@ -80,7 +81,9 @@ async def generate_world(request: WorldGenerationRequest):
             config["vulnerability_distribution"] = request.vulnerability_distribution
         else:
             config["vulnerability_distribution"] = {
-                "I": 0.1, "II": 0.3, "III": 0.6
+                "I": settings.TREE_LEVEL_I_RATIO,
+                "II": settings.TREE_LEVEL_II_RATIO,
+                "III": settings.TREE_LEVEL_III_RATIO
             }
         
         # Apply any configuration overrides
@@ -225,7 +228,6 @@ async def generate_world(request: WorldGenerationRequest):
             }
         )
 
-
 @router.get(
     "/world/config/defaults",
     summary="Get Default Configuration",
@@ -239,39 +241,34 @@ async def get_default_config():
         Dict: Default configuration values
     """
     return {
-        "map_size": [2000, 2000],
-        "road_density": 0.7,
-        "main_road_count": 4,
-        "secondary_road_density": 0.5,
-        "main_road_width": 12.0,
-        "secondary_road_width": 6.0,
-        "main_road_lanes": 4,
-        "secondary_road_lanes": 2,
-        "main_road_speed_limit": 70.0,
-        "secondary_road_speed_limit": 40.0,
+        "map_size": settings.DEFAULT_MAP_SIZE,
+        "road_density": settings.DEFAULT_ROAD_DENSITY,
+        "main_road_count": settings.DEFAULT_MAIN_ROAD_COUNT,
+        "secondary_road_density": settings.DEFAULT_SECONDARY_ROAD_DENSITY,
+        "main_road_width": settings.DEFAULT_MAIN_ROAD_WIDTH,
+        "secondary_road_width": settings.DEFAULT_SECONDARY_ROAD_WIDTH,
+        "main_road_lanes": settings.DEFAULT_MAIN_ROAD_LANES,
+        "secondary_road_lanes": settings.DEFAULT_SECONDARY_ROAD_LANES,
+        "main_road_speed_limit": settings.DEFAULT_MAIN_ROAD_SPEED_LIMIT,
+        "secondary_road_speed_limit": settings.DEFAULT_SECONDARY_ROAD_SPEED_LIMIT,
         # Tree generation defaults (WS-1.2)
-        "include_trees": True,
-        "tree_spacing": 25.0,
-        "tree_max_offset": 8.0,
+        "include_trees": settings.DEFAULT_INCLUDE_TREES,
+        "tree_spacing": settings.DEFAULT_TREE_SPACING,
+        "tree_max_offset": settings.DEFAULT_TREE_MAX_OFFSET,
         "vulnerability_distribution": {
-            "I": 0.1,
-            "II": 0.3,
-            "III": 0.6
+            "I": settings.TREE_LEVEL_I_RATIO,
+            "II": settings.TREE_LEVEL_II_RATIO,
+            "III": settings.TREE_LEVEL_III_RATIO
         },
         # Facility generation defaults (WS-1.3)
-        "include_facilities": True,
-        "ambulance_stations": 3,
-        "shelters": 8,
-        "shelter_capacity_range": [100, 1000],
+        "include_facilities": settings.DEFAULT_INCLUDE_FACILITIES,
+        "ambulance_stations": settings.DEFAULT_AMBULANCE_STATIONS_COUNT,
+        "shelters": settings.DEFAULT_SHELTERS_COUNT,
+        "shelter_capacity_range": settings.DEFAULT_SHELTER_CAPACITY_RANGE,
         # Building generation defaults (WS-1.5)
-        "include_buildings": True,
-        "building_density": 0.3,
-        "min_building_distance": 25.0,
-        "road_buffer_distance": 15.0,
-        "building_type_weights": {
-            "residential": 0.6,
-            "commercial": 0.2,
-            "mixed": 0.15,
-            "industrial": 0.05
-        }
+        "include_buildings": settings.DEFAULT_INCLUDE_BUILDINGS,
+        "building_density": settings.DEFAULT_BUILDING_DENSITY,
+        "min_building_distance": settings.DEFAULT_MIN_BUILDING_DISTANCE,
+        "road_buffer_distance": settings.DEFAULT_ROAD_BUFFER_DISTANCE,
+        "building_type_weights": settings.DEFAULT_BUILDING_TYPE_WEIGHTS
     }
