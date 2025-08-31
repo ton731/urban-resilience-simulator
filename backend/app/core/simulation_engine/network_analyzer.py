@@ -16,107 +16,102 @@ from .models import (
     RoadObstruction,
     VehicleType,
     VehicleConfig,
-    DEFAULT_VEHICLE_CONFIGS
+    DEFAULT_VEHICLE_CONFIGS,
 )
 
 
 class NetworkAnalyzer:
     """
     Implements SE-2.2: Road Network Analysis
-    
+
     Provides pathfinding capabilities with awareness of road obstructions
     and vehicle-specific requirements (width, turning radius, etc.)
     """
-    
+
     def __init__(self):
         """Initialize the network analyzer."""
         self.road_graph: Optional[nx.Graph] = None
         self.road_obstructions: Dict[str, RoadObstruction] = {}
         self.vehicle_configs = DEFAULT_VEHICLE_CONFIGS
-    
+
     def initialize_road_network(
-        self,
-        nodes_data: Dict[str, Any],
-        edges_data: Dict[str, Any]
+        self, nodes_data: Dict[str, Any], edges_data: Dict[str, Any]
     ):
         """
         Initialize the road network graph from world synthesizer data.
-        
+
         Args:
             nodes_data: Dictionary of road network nodes
             edges_data: Dictionary of road network edges
         """
         self.road_graph = nx.Graph()
-        
+
         # Add nodes to the graph
         for node_id, node_data in nodes_data.items():
             self.road_graph.add_node(
                 node_id,
-                x=node_data['x'],
-                y=node_data['y'],
-                type=node_data.get('type', 'intersection')
+                x=node_data["x"],
+                y=node_data["y"],
+                type=node_data.get("type", "intersection"),
             )
-        
+
         # Add edges to the graph
         for edge_id, edge_data in edges_data.items():
-            from_node = edge_data['from_node']
-            to_node = edge_data['to_node']
-            
+            from_node = edge_data["from_node"]
+            to_node = edge_data["to_node"]
+
             # Calculate edge length (Euclidean distance)
-            from_coords = (nodes_data[from_node]['x'], nodes_data[from_node]['y'])
-            to_coords = (nodes_data[to_node]['x'], nodes_data[to_node]['y'])
+            from_coords = (nodes_data[from_node]["x"], nodes_data[from_node]["y"])
+            to_coords = (nodes_data[to_node]["x"], nodes_data[to_node]["y"])
             distance = self._calculate_distance(from_coords, to_coords)
-            
+
             self.road_graph.add_edge(
                 from_node,
                 to_node,
                 edge_id=edge_id,
                 distance=distance,
-                width=edge_data.get('width', 6.0),
-                lanes=edge_data.get('lanes', 2),
-                is_bidirectional=edge_data.get('is_bidirectional', True),
-                road_type=edge_data.get('road_type', 'secondary'),
-                speed_limit=edge_data.get('speed_limit', 40.0),
-                original_width=edge_data.get('width', 6.0)  # Store original width
+                width=edge_data.get("width", 6.0),
+                lanes=edge_data.get("lanes", 2),
+                is_bidirectional=edge_data.get("is_bidirectional", True),
+                road_type=edge_data.get("road_type", "secondary"),
+                speed_limit=edge_data.get("speed_limit", 40.0),
+                original_width=edge_data.get("width", 6.0),  # Store original width
             )
-    
+
     def update_obstructions(self, obstructions: List[RoadObstruction]):
         """
         Update road obstructions and modify graph edge weights accordingly.
-        
+
         Args:
             obstructions: List of RoadObstruction objects
         """
         # Clear previous obstructions
         self.road_obstructions = {}
-        
+
         # Reset all edges to original width
         for u, v, data in self.road_graph.edges(data=True):
-            data['width'] = data['original_width']
-        
+            data["width"] = data["original_width"]
+
         # Apply new obstructions
         for obstruction in obstructions:
             self.road_obstructions[obstruction.obstruction_id] = obstruction
-            
+
             # Find the edge corresponding to this road
             edge = self._find_edge_by_id(obstruction.road_edge_id)
             if edge:
                 u, v = edge
                 # Update the effective width for this edge
-                self.road_graph[u][v]['width'] = obstruction.remaining_width
-    
-    def find_path(
-        self,
-        request: PathfindingRequest
-    ) -> PathfindingResult:
+                self.road_graph[u][v]["width"] = obstruction.remaining_width
+
+    def find_path(self, request: PathfindingRequest) -> PathfindingResult:
         """
         Find the optimal path between two points for a specific vehicle type.
-        
+
         Implements A* pathfinding with obstruction awareness and vehicle constraints.
-        
+
         Args:
             request: PathfindingRequest with start/end points and vehicle type
-            
+
         Returns:
             PathfindingResult with path details or failure indication
         """
@@ -128,76 +123,26 @@ class NetworkAnalyzer:
                 total_distance=0.0,
                 estimated_travel_time=0.0,
                 vehicle_type=request.vehicle_type,
-                blocked_roads=[]
+                blocked_roads=[],
             )
-        
+
         # Try road-based pathfinding first
         start_node, end_node = self._prepare_pathfinding_nodes(
             request.start_point, request.end_point
         )
-        
-        if start_node and self.road_graph.has_node(start_node):
-            start_data = self.road_graph.nodes[start_node]
-        if end_node and self.road_graph.has_node(end_node):
-            end_data = self.road_graph.nodes[end_node]
-        
-        # Check if nodes are connected in graph
-        if start_node and end_node and self.road_graph.has_node(start_node) and self.road_graph.has_node(end_node):
-            # Check basic connectivity
-            if start_node == end_node:
-                print("DEBUG: Start and end are the same node")
-            else:
-                start_neighbors = list(self.road_graph.neighbors(start_node))
-                end_neighbors = list(self.road_graph.neighbors(end_node))
-                print(f"DEBUG: Start node has {len(start_neighbors)} neighbors: {start_neighbors}")
-                print(f"DEBUG: End node has {len(end_neighbors)} neighbors: {end_neighbors}")
-                
-                # Check graph connectivity
-                import networkx as nx
-                try:
-                    if nx.has_path(self.road_graph, start_node, end_node):
-                        shortest_path = nx.shortest_path(self.road_graph, start_node, end_node)
-                        print(f"DEBUG: NetworkX finds path of length {len(shortest_path)}: {shortest_path}")
-                    else:
-                        print("DEBUG: NetworkX confirms no path exists between nodes")
-                        
-                        # Check connected components
-                        components = list(nx.connected_components(self.road_graph))
-                        print(f"DEBUG: Graph has {len(components)} connected components")
-                        
-                        start_component = None
-                        end_component = None
-                        for i, component in enumerate(components):
-                            if start_node in component:
-                                start_component = i
-                                print(f"DEBUG: Start node in component {i} (size: {len(component)})")
-                            if end_node in component:
-                                end_component = i
-                                print(f"DEBUG: End node in component {i} (size: {len(component)})")
-                        
-                        if start_component != end_component:
-                            print(f"DEBUG: Nodes are in different components ({start_component} vs {end_component})")
-                        
-                except Exception as e:
-                    print(f"DEBUG: NetworkX error: {e}")
-        else:
-            print(f"DEBUG: Missing nodes in graph - start_exists={self.road_graph.has_node(start_node) if start_node else False}, end_exists={self.road_graph.has_node(end_node) if end_node else False}")
-        
+
         # Get vehicle configuration
         vehicle_config = self.vehicle_configs.get(
-            request.vehicle_type,
-            DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
+            request.vehicle_type, DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
         )
-        
+
         # Perform A* pathfinding with vehicle constraints
         try:
-            print(f"DEBUG: Starting A* pathfinding from {start_node} to {end_node}")
             path_nodes = self._astar_pathfinding(
                 start_node, end_node, vehicle_config, request.max_travel_time
             )
-            
+
             if not path_nodes:
-                print("DEBUG: A* pathfinding returned empty path")
                 return PathfindingResult(
                     success=False,
                     path_coordinates=[],
@@ -205,53 +150,59 @@ class NetworkAnalyzer:
                     total_distance=0.0,
                     estimated_travel_time=0.0,
                     vehicle_type=request.vehicle_type,
-                    blocked_roads=[]
+                    blocked_roads=[],
                 )
-            else:
-                print(f"DEBUG: A* found path with {len(path_nodes)} nodes: {path_nodes[:5]}..." if len(path_nodes) > 5 else f"DEBUG: A* found path: {path_nodes}")
-            
+
             # Convert path to coordinates and calculate metrics
             path_coordinates = self._nodes_to_coordinates(path_nodes)
             total_distance = self._calculate_path_distance(path_nodes)
             travel_time = self._estimate_travel_time(path_nodes, vehicle_config)
             blocked_roads = self._identify_blocked_roads_in_path(path_nodes)
-            
+
             # Handle coordinates properly - ensure start and end points are correct
             if path_coordinates:
                 # Always ensure the first coordinate matches the requested start point
                 if path_coordinates[0] != request.start_point:
                     # Check if start point is reasonably close to first coordinate
                     first_coord = path_coordinates[0]
-                    start_distance = self._calculate_distance(request.start_point, first_coord)
+                    start_distance = self._calculate_distance(
+                        request.start_point, first_coord
+                    )
                     if start_distance > 1.0:  # If more than 1 meter difference
                         path_coordinates.insert(0, request.start_point)
                     else:
-                        path_coordinates[0] = request.start_point  # Just replace if very close
-                
+                        path_coordinates[0] = (
+                            request.start_point
+                        )  # Just replace if very close
+
                 # Always ensure the last coordinate matches the requested end point
                 if path_coordinates[-1] != request.end_point:
                     # Check if end point is reasonably close to last coordinate
                     last_coord = path_coordinates[-1]
-                    end_distance = self._calculate_distance(request.end_point, last_coord)
+                    end_distance = self._calculate_distance(
+                        request.end_point, last_coord
+                    )
                     if end_distance > 1.0:  # If more than 1 meter difference
                         path_coordinates.append(request.end_point)
                     else:
-                        path_coordinates[-1] = request.end_point  # Just replace if very close
-            
+                        path_coordinates[-1] = (
+                            request.end_point
+                        )  # Just replace if very close
+
             # Clean up virtual nodes after successful pathfinding
             virtual_nodes_to_cleanup = []
             # Always try to cleanup start node if it's virtual
             if self.road_graph.has_node(start_node):
                 start_node_data = self.road_graph.nodes[start_node]
-                if start_node_data.get('is_virtual', False):
+                if start_node_data.get("is_virtual", False):
                     virtual_nodes_to_cleanup.append(start_node)
-            
-            # Always try to cleanup end node if it's virtual  
+
+            # Always try to cleanup end node if it's virtual
             if self.road_graph.has_node(end_node):
                 end_node_data = self.road_graph.nodes[end_node]
-                if end_node_data.get('is_virtual', False):
+                if end_node_data.get("is_virtual", False):
                     virtual_nodes_to_cleanup.append(end_node)
-            
+
             # Create result before cleanup
             result = PathfindingResult(
                 success=True,
@@ -260,15 +211,15 @@ class NetworkAnalyzer:
                 total_distance=total_distance,
                 estimated_travel_time=travel_time,
                 vehicle_type=request.vehicle_type,
-                blocked_roads=blocked_roads
+                blocked_roads=blocked_roads,
             )
-            
+
             # Clean up virtual nodes to restore original graph
             if virtual_nodes_to_cleanup:
                 self._cleanup_virtual_nodes(virtual_nodes_to_cleanup)
-                
+
             return result
-            
+
         except Exception as e:
             return PathfindingResult(
                 success=False,
@@ -279,41 +230,43 @@ class NetworkAnalyzer:
                 vehicle_type=request.vehicle_type,
                 blocked_roads=[],
             )
-    
+
     def _find_nearest_node(self, point: Tuple[float, float]) -> Optional[str]:
         """
         Find the nearest road network node to a given point.
-        
+
         Args:
             point: Coordinates (x, y)
-            
+
         Returns:
             Node ID of the nearest node, or None if no nodes available
         """
         if not self.road_graph.nodes():
             return None
-        
-        min_distance = float('inf')
+
+        min_distance = float("inf")
         nearest_node = None
-        
+
         for node_id, node_data in self.road_graph.nodes(data=True):
-            node_point = (node_data['x'], node_data['y'])
+            node_point = (node_data["x"], node_data["y"])
             distance = self._calculate_distance(point, node_point)
-            
+
             if distance < min_distance:
                 min_distance = distance
                 nearest_node = node_id
-        
+
         return nearest_node
-    
-    def _find_closest_road_point(self, point: Tuple[float, float]) -> Optional[Dict[str, Any]]:
+
+    def _find_closest_road_point(
+        self, point: Tuple[float, float]
+    ) -> Optional[Dict[str, Any]]:
         """
         Find the closest point on any road edge to a given point.
         This enables road-based pathfinding instead of node-to-node pathfinding.
-        
+
         Args:
             point: Coordinates (x, y)
-            
+
         Returns:
             Dictionary with closest road information or None if no roads available
             {
@@ -327,68 +280,74 @@ class NetworkAnalyzer:
         """
         if not self.road_graph.edges():
             return None
-        
-        min_distance = float('inf')
+
+        min_distance = float("inf")
         closest_road_info = None
-        
+
         for from_node, to_node, edge_data in self.road_graph.edges(data=True):
-            from_coords = (self.road_graph.nodes[from_node]['x'], 
-                          self.road_graph.nodes[from_node]['y'])
-            to_coords = (self.road_graph.nodes[to_node]['x'], 
-                        self.road_graph.nodes[to_node]['y'])
-            
+            from_coords = (
+                self.road_graph.nodes[from_node]["x"],
+                self.road_graph.nodes[from_node]["y"],
+            )
+            to_coords = (
+                self.road_graph.nodes[to_node]["x"],
+                self.road_graph.nodes[to_node]["y"],
+            )
+
             # Create line segment for this road edge
             road_line = LineString([from_coords, to_coords])
-            
+
             # Find closest point on this road segment
             point_geom = Point(point)
             closest_point_on_road = road_line.interpolate(road_line.project(point_geom))
-            
+
             distance = point_geom.distance(closest_point_on_road)
-            
+
             if distance < min_distance:
                 min_distance = distance
-                
+
                 # Calculate position along the edge (0.0 to 1.0)
                 total_length = road_line.length
                 if total_length > 0:
-                    position_ratio = road_line.project(closest_point_on_road) / total_length
+                    position_ratio = (
+                        road_line.project(closest_point_on_road) / total_length
+                    )
                 else:
                     position_ratio = 0.0
-                
+
                 closest_road_info = {
-                    'edge_id': edge_data.get('edge_id', f"{from_node}-{to_node}"),
-                    'from_node': from_node,
-                    'to_node': to_node,
-                    'closest_point': (closest_point_on_road.x, closest_point_on_road.y),
-                    'distance_to_road': distance,
-                    'position_on_edge': position_ratio,
-                    'edge_data': edge_data
+                    "edge_id": edge_data.get("edge_id", f"{from_node}-{to_node}"),
+                    "from_node": from_node,
+                    "to_node": to_node,
+                    "closest_point": (closest_point_on_road.x, closest_point_on_road.y),
+                    "distance_to_road": distance,
+                    "position_on_edge": position_ratio,
+                    "edge_data": edge_data,
                 }
-        
+
         return closest_road_info
-    
+
     def _create_virtual_node_on_road(
         self,
         point: Tuple[float, float],
         road_info: Dict[str, Any],
-        node_id_prefix: str = "virtual"
+        node_id_prefix: str = "virtual",
     ) -> str:
         """
         Create a virtual node on a road edge at the closest point to the given point.
         This allows pathfinding to connect to roads at any point, not just existing nodes.
-        
+
         Args:
             point: Original point coordinates
             road_info: Road information from _find_closest_road_point
             node_id_prefix: Prefix for the virtual node ID
-            
+
         Returns:
             ID of the created virtual node
         """
         virtual_node_id = f"{node_id_prefix}_{uuid.uuid4()}"
-        closest_point = road_info['closest_point']
-        
+        closest_point = road_info["closest_point"]
+
         # Add virtual node to the graph
         self.road_graph.add_node(
             virtual_node_id,
@@ -396,100 +355,107 @@ class NetworkAnalyzer:
             y=closest_point[1],
             type="virtual",
             original_point=point,
-            is_virtual=True
+            is_virtual=True,
         )
-        print(f"DEBUG: Created virtual node {virtual_node_id} at ({closest_point[0]:.1f}, {closest_point[1]:.1f})")
-        
+
         # Split the original edge and connect to virtual node
-        from_node = road_info['from_node']
-        to_node = road_info['to_node']
-        edge_data = road_info['edge_data']
-        position_ratio = road_info['position_on_edge']
-        
+        from_node = road_info["from_node"]
+        to_node = road_info["to_node"]
+        edge_data = road_info["edge_data"]
+        position_ratio = road_info["position_on_edge"]
+
         # Only split the edge if the virtual node is not too close to existing nodes
         tolerance = 10.0  # meters
-        from_coords = (self.road_graph.nodes[from_node]['x'], 
-                      self.road_graph.nodes[from_node]['y'])
-        to_coords = (self.road_graph.nodes[to_node]['x'], 
-                    self.road_graph.nodes[to_node]['y'])
-        
+        from_coords = (
+            self.road_graph.nodes[from_node]["x"],
+            self.road_graph.nodes[from_node]["y"],
+        )
+        to_coords = (
+            self.road_graph.nodes[to_node]["x"],
+            self.road_graph.nodes[to_node]["y"],
+        )
+
         dist_to_from = self._calculate_distance(closest_point, from_coords)
         dist_to_to = self._calculate_distance(closest_point, to_coords)
-        
+
         if dist_to_from < tolerance:
             # Virtual node is too close to from_node, just use from_node
-            print(f"DEBUG: Virtual node too close to from_node, using {from_node}")
             return from_node
         elif dist_to_to < tolerance:
-            # Virtual node is too close to to_node, just use to_node  
-            print(f"DEBUG: Virtual node too close to to_node, using {to_node}")
+            # Virtual node is too close to to_node, just use to_node
             return to_node
         else:
-            print(f"DEBUG: Splitting edge between {from_node} and {to_node}")
             # Split the edge: create edges from_node->virtual and virtual->to_node
-            original_distance = edge_data['distance']
-            
+            original_distance = edge_data["distance"]
+
             # Calculate distances for new edge segments
             distance_to_virtual = original_distance * position_ratio
             distance_from_virtual = original_distance * (1.0 - position_ratio)
-            
+
             # Remove the original edge
             if self.road_graph.has_edge(from_node, to_node):
-                print(f"DEBUG: Removing original edge {from_node} -> {to_node}")
                 self.road_graph.remove_edge(from_node, to_node)
-            else:
-                print(f"DEBUG: Warning - original edge {from_node} -> {to_node} not found")
-            
+
             # Add new edges through virtual node
-            print(f"DEBUG: Adding edge {from_node} -> {virtual_node_id} (distance: {distance_to_virtual:.1f}m)")
             self.road_graph.add_edge(
                 from_node,
                 virtual_node_id,
                 edge_id=f"{edge_data.get('edge_id', '')}_part1",
                 distance=distance_to_virtual,
-                width=edge_data.get('width', 6.0),
-                lanes=edge_data.get('lanes', 2),
-                road_type=edge_data.get('road_type', 'secondary'),
-                speed_limit=edge_data.get('speed_limit', 40.0),
-                travel_time=distance_to_virtual / 1000 / (edge_data.get('speed_limit', 40.0) / 3600),
-                weight=distance_to_virtual / 1000 / (edge_data.get('speed_limit', 40.0) / 3600),
-                original_width=edge_data.get('original_width', edge_data.get('width', 6.0))
+                width=edge_data.get("width", 6.0),
+                lanes=edge_data.get("lanes", 2),
+                road_type=edge_data.get("road_type", "secondary"),
+                speed_limit=edge_data.get("speed_limit", 40.0),
+                travel_time=distance_to_virtual
+                / 1000
+                / (edge_data.get("speed_limit", 40.0) / 3600),
+                weight=distance_to_virtual
+                / 1000
+                / (edge_data.get("speed_limit", 40.0) / 3600),
+                original_width=edge_data.get(
+                    "original_width", edge_data.get("width", 6.0)
+                ),
             )
-            
-            print(f"DEBUG: Adding edge {virtual_node_id} -> {to_node} (distance: {distance_from_virtual:.1f}m)")
+
             self.road_graph.add_edge(
                 virtual_node_id,
                 to_node,
                 edge_id=f"{edge_data.get('edge_id', '')}_part2",
                 distance=distance_from_virtual,
-                width=edge_data.get('width', 6.0),
-                lanes=edge_data.get('lanes', 2),
-                road_type=edge_data.get('road_type', 'secondary'),
-                speed_limit=edge_data.get('speed_limit', 40.0),
-                travel_time=distance_from_virtual / 1000 / (edge_data.get('speed_limit', 40.0) / 3600),
-                weight=distance_from_virtual / 1000 / (edge_data.get('speed_limit', 40.0) / 3600),
-                original_width=edge_data.get('original_width', edge_data.get('width', 6.0))
+                width=edge_data.get("width", 6.0),
+                lanes=edge_data.get("lanes", 2),
+                road_type=edge_data.get("road_type", "secondary"),
+                speed_limit=edge_data.get("speed_limit", 40.0),
+                travel_time=distance_from_virtual
+                / 1000
+                / (edge_data.get("speed_limit", 40.0) / 3600),
+                weight=distance_from_virtual
+                / 1000
+                / (edge_data.get("speed_limit", 40.0) / 3600),
+                original_width=edge_data.get(
+                    "original_width", edge_data.get("width", 6.0)
+                ),
             )
-            
+
             # Add perpendicular connection from original point to virtual node
-            perpendicular_distance = road_info['distance_to_road']
+            perpendicular_distance = road_info["distance_to_road"]
             if perpendicular_distance > 0.1:  # Only add if there's meaningful distance
                 access_node_id = f"access_{uuid.uuid4()}"
-                
+
                 # Add access node at original point
                 self.road_graph.add_node(
                     access_node_id,
                     x=point[0],
                     y=point[1],
                     type="access",
-                    is_virtual=True
+                    is_virtual=True,
                 )
-                
+
                 # Add access edge (straight line connection to road)
                 # Use walking speed for access segments
                 access_speed = 5.0  # km/h (walking speed)
                 access_time = perpendicular_distance / 1000 / (access_speed / 3600)
-                
+
                 self.road_graph.add_edge(
                     access_node_id,
                     virtual_node_id,
@@ -502,158 +468,156 @@ class NetworkAnalyzer:
                     travel_time=access_time,
                     weight=access_time,
                     original_width=10.0,
-                    is_access_road=True
+                    is_access_road=True,
                 )
-                
+
                 return access_node_id
-            
+
             return virtual_node_id
-    
+
     def _prepare_pathfinding_nodes(
-        self, 
-        start_point: Tuple[float, float], 
-        end_point: Tuple[float, float]
+        self, start_point: Tuple[float, float], end_point: Tuple[float, float]
     ) -> Tuple[str, str]:
         """
         Prepare start and end nodes for pathfinding with smart fallback strategies.
-        
+
         For START: Try normal road connection, fallback to nearest node
         For END: Try normal road connection, if failed, FORCE connection to ensure path exists
-        
+
         This ensures we ALWAYS find a path: start -> roads -> closest_road_node -> end
-        
+
         Args:
             start_point: Starting coordinates
             end_point: Ending coordinates
-            
+
         Returns:
             Tuple of (start_node_id, end_node_id)
         """
         # === START POINT HANDLING ===
         start_node = None
-        
+
         # Try road-based connection for start point
         try:
             start_road_info = self._find_closest_road_point(start_point)
-            print(f"DEBUG: Start point {start_point} - closest road distance: {start_road_info['distance_to_road']:.1f}m" if start_road_info else "DEBUG: No road found for start point")
-            
-            if start_road_info and start_road_info['distance_to_road'] <= 200.0:  # Reasonable distance
+
+            if (
+                start_road_info and start_road_info["distance_to_road"] <= 200.0
+            ):  # Reasonable distance
                 # If the start point is very close to an existing node, just use that node
-                if start_road_info['distance_to_road'] < 10.0:
+                if start_road_info["distance_to_road"] < 10.0:
                     # Check if we're close to either endpoint of the edge
-                    from_node_pos = (self.road_graph.nodes[start_road_info['from_node']]['x'],
-                                    self.road_graph.nodes[start_road_info['from_node']]['y'])
-                    to_node_pos = (self.road_graph.nodes[start_road_info['to_node']]['x'],
-                                  self.road_graph.nodes[start_road_info['to_node']]['y'])
-                    
+                    from_node_pos = (
+                        self.road_graph.nodes[start_road_info["from_node"]]["x"],
+                        self.road_graph.nodes[start_road_info["from_node"]]["y"],
+                    )
+                    to_node_pos = (
+                        self.road_graph.nodes[start_road_info["to_node"]]["x"],
+                        self.road_graph.nodes[start_road_info["to_node"]]["y"],
+                    )
+
                     dist_to_from = self._calculate_distance(start_point, from_node_pos)
                     dist_to_to = self._calculate_distance(start_point, to_node_pos)
-                    
+
                     if dist_to_from < 15.0:
-                        print(f"DEBUG: Using existing from_node {start_road_info['from_node']} for start (distance: {dist_to_from:.1f}m)")
-                        start_node = start_road_info['from_node']
+                        start_node = start_road_info["from_node"]
                     elif dist_to_to < 15.0:
-                        print(f"DEBUG: Using existing to_node {start_road_info['to_node']} for start (distance: {dist_to_to:.1f}m)")
-                        start_node = start_road_info['to_node']
+                        start_node = start_road_info["to_node"]
                     else:
-                        print("DEBUG: Creating virtual start node on road")
                         start_node = self._create_virtual_node_on_road(
                             start_point, start_road_info, "start"
                         )
                 else:
-                    print("DEBUG: Creating virtual start node on road")
                     start_node = self._create_virtual_node_on_road(
                         start_point, start_road_info, "start"
                     )
         except Exception as e:
             print(f"Road-based start node creation failed: {e}")
             start_node = None
-        
+
         # Fallback to nearest node for start if road connection failed
         if not start_node:
             start_node = self._find_nearest_node(start_point)
-            print(f"DEBUG: Using nearest node {start_node} for start point")
-        
+
         # === END POINT HANDLING ===
         end_node = None
-        
+
         # Try road-based connection for end point first
         try:
             end_road_info = self._find_closest_road_point(end_point)
-            print(f"DEBUG: End point {end_point} - closest road distance: {end_road_info['distance_to_road']:.1f}m" if end_road_info else "DEBUG: No road found for end point")
-            
-            if end_road_info and end_road_info['distance_to_road'] <= 200.0:  # Reasonable distance
+
+            if (
+                end_road_info and end_road_info["distance_to_road"] <= 200.0
+            ):  # Reasonable distance
                 # If the end point is very close to an existing node, just use that node
-                if end_road_info['distance_to_road'] < 10.0:
+                if end_road_info["distance_to_road"] < 10.0:
                     # Check if we're close to either endpoint of the edge
-                    from_node_pos = (self.road_graph.nodes[end_road_info['from_node']]['x'],
-                                    self.road_graph.nodes[end_road_info['from_node']]['y'])
-                    to_node_pos = (self.road_graph.nodes[end_road_info['to_node']]['x'],
-                                  self.road_graph.nodes[end_road_info['to_node']]['y'])
-                    
+                    from_node_pos = (
+                        self.road_graph.nodes[end_road_info["from_node"]]["x"],
+                        self.road_graph.nodes[end_road_info["from_node"]]["y"],
+                    )
+                    to_node_pos = (
+                        self.road_graph.nodes[end_road_info["to_node"]]["x"],
+                        self.road_graph.nodes[end_road_info["to_node"]]["y"],
+                    )
+
                     dist_to_from = self._calculate_distance(end_point, from_node_pos)
                     dist_to_to = self._calculate_distance(end_point, to_node_pos)
-                    
+
                     if dist_to_from < 15.0:
-                        print(f"DEBUG: Using existing from_node {end_road_info['from_node']} for end (distance: {dist_to_from:.1f}m)")
-                        end_node = end_road_info['from_node']
+                        end_node = end_road_info["from_node"]
                     elif dist_to_to < 15.0:
-                        print(f"DEBUG: Using existing to_node {end_road_info['to_node']} for end (distance: {dist_to_to:.1f}m)")
-                        end_node = end_road_info['to_node']
+                        end_node = end_road_info["to_node"]
                     else:
-                        print("DEBUG: Creating virtual end node on road")
                         end_node = self._create_virtual_node_on_road(
                             end_point, end_road_info, "end"
                         )
                 else:
-                    print("DEBUG: Creating virtual end node on road")
                     end_node = self._create_virtual_node_on_road(
                         end_point, end_road_info, "end"
                     )
         except Exception as e:
             print(f"Road-based end node creation failed: {e}")
             end_node = None
-        
+
         # If road-based connection failed for end point, FORCE connection
         # This ensures we can ALWAYS reach the destination
         if not end_node:
-            print("DEBUG: Using forced connection for end point")
             end_node = self._create_forced_connection_to_end(end_point)
-        
+
         return start_node, end_node
-    
+
     def _create_forced_connection_to_end(self, end_point: Tuple[float, float]) -> str:
         """
         Create a forced connection to the end point by connecting it to the closest road node.
         This ensures we can ALWAYS reach the destination, no matter how far it is from roads.
-        
+
         The strategy: find closest road node -> create direct connection (unlimited distance)
-        
+
         Args:
             end_point: End point coordinates
-            
+
         Returns:
             ID of the created end node
         """
         # Find the closest road node (not virtual nodes)
         closest_road_node = None
-        min_distance = float('inf')
-        
+        min_distance = float("inf")
+
         for node_id, node_data in self.road_graph.nodes(data=True):
             # Skip virtual/temporary nodes - we want real road nodes
-            if node_data.get('is_virtual', False):
+            if node_data.get("is_virtual", False):
                 continue
             # Also skip other temporary nodes
-            if node_data.get('type') in ['forced_access', 'forced_standalone']:
+            if node_data.get("type") in ["forced_access", "forced_standalone"]:
                 continue
-                
-            node_coords = (node_data['x'], node_data['y'])
+
+            node_coords = (node_data["x"], node_data["y"])
             distance = self._calculate_distance(end_point, node_coords)
-            
+
             if distance < min_distance:
                 min_distance = distance
                 closest_road_node = node_id
-        
+
         if not closest_road_node:
             # Emergency fallback: create standalone end node
             print(f"Warning: No road nodes found, creating standalone end node")
@@ -663,12 +627,10 @@ class NetworkAnalyzer:
                 x=end_point[0],
                 y=end_point[1],
                 type="end_standalone",
-                is_virtual=True
+                is_virtual=True,
             )
             return end_node_id
-        
-        print(f"Forcing connection from road node {closest_road_node} to end point (distance: {min_distance:.1f}m)")
-        
+
         # Create end node at the exact end point location
         end_node_id = f"end_forced_{uuid.uuid4()}"
         self.road_graph.add_node(
@@ -678,14 +640,16 @@ class NetworkAnalyzer:
             type="end_forced",
             is_virtual=True,
             connected_from=closest_road_node,
-            original_point=end_point
+            original_point=end_point,
         )
-        
+
         # Create forced connection from closest road node to end point
         # Use walking speed for the final connection segment
         connection_speed = 5.0  # km/h (walking speed)
-        connection_time = min_distance / 1000 / (connection_speed / 3600) if min_distance > 0 else 0.1
-        
+        connection_time = (
+            min_distance / 1000 / (connection_speed / 3600) if min_distance > 0 else 0.1
+        )
+
         self.road_graph.add_edge(
             closest_road_node,
             end_node_id,
@@ -699,45 +663,43 @@ class NetworkAnalyzer:
             weight=connection_time,
             original_width=10.0,
             is_access_road=True,
-            is_forced_end_connection=True
+            is_forced_end_connection=True,
         )
-        
+
         return end_node_id
-    
+
     def _create_forced_connection(
-        self, 
-        point: Tuple[float, float], 
-        node_type: str = "forced"
+        self, point: Tuple[float, float], node_type: str = "forced"
     ) -> str:
         """
         Force create a connection to the road network by finding the closest road node
         and creating a direct connection, regardless of distance.
-        
+
         This ensures we ALWAYS have a path, even if the point is very far from roads.
-        
+
         Args:
             point: Coordinates to connect
             node_type: Type prefix for the node ID
-            
+
         Returns:
             ID of the connected node
         """
         # Find the closest existing road node (not just any node)
         closest_road_node = None
-        min_distance = float('inf')
-        
+        min_distance = float("inf")
+
         for node_id, node_data in self.road_graph.nodes(data=True):
             # Skip virtual nodes to avoid connecting to temporary nodes
-            if node_data.get('is_virtual', False):
+            if node_data.get("is_virtual", False):
                 continue
-                
-            node_coords = (node_data['x'], node_data['y'])
+
+            node_coords = (node_data["x"], node_data["y"])
             distance = self._calculate_distance(point, node_coords)
-            
+
             if distance < min_distance:
                 min_distance = distance
                 closest_road_node = node_id
-        
+
         if not closest_road_node:
             # If somehow no road nodes exist, create a standalone node
             forced_node_id = f"{node_type}_standalone_{uuid.uuid4()}"
@@ -746,10 +708,10 @@ class NetworkAnalyzer:
                 x=point[0],
                 y=point[1],
                 type="forced_standalone",
-                is_virtual=True
+                is_virtual=True,
             )
             return forced_node_id
-        
+
         # Create access node at the original point
         access_node_id = f"{node_type}_forced_{uuid.uuid4()}"
         self.road_graph.add_node(
@@ -758,16 +720,16 @@ class NetworkAnalyzer:
             y=point[1],
             type="forced_access",
             is_virtual=True,
-            connected_to=closest_road_node
+            connected_to=closest_road_node,
         )
-        
+
         # Create direct connection to closest road node, regardless of distance
         connection_distance = min_distance
-        
+
         # Use slow speed for very long connections (walking speed)
         connection_speed = 5.0  # km/h (walking speed)
         connection_time = connection_distance / 1000 / (connection_speed / 3600)
-        
+
         # Add bidirectional connection
         self.road_graph.add_edge(
             access_node_id,
@@ -782,263 +744,254 @@ class NetworkAnalyzer:
             weight=connection_time,
             original_width=10.0,
             is_access_road=True,
-            is_forced_connection=True
+            is_forced_connection=True,
         )
-        
+
         return access_node_id
-    
+
     def _cleanup_virtual_nodes(self, virtual_nodes: List[str]) -> None:
         """
         Clean up virtual nodes and restore original graph structure.
         This prevents accumulation of temporary nodes in the graph.
-        
+
         Args:
             virtual_nodes: List of virtual node IDs to remove
         """
         for node_id in virtual_nodes:
             if self.road_graph.has_node(node_id):
                 node_data = self.road_graph.nodes[node_id]
-                
+
                 # If this is a virtual node that split an edge, restore the original edge
-                if node_data.get('type') in ['virtual', 'access']:
+                if node_data.get("type") in ["virtual", "access"]:
                     neighbors = list(self.road_graph.neighbors(node_id))
-                    
+
                     # For virtual nodes that split roads, reconnect the original nodes
-                    if len(neighbors) == 2 and node_data.get('type') == 'virtual':
+                    if len(neighbors) == 2 and node_data.get("type") == "virtual":
                         node1, node2 = neighbors
-                        
+
                         # Get edge data from one of the split edges
                         edge1_data = self.road_graph[node_id][node1]
                         edge2_data = self.road_graph[node_id][node2]
-                        
+
                         # Only restore if both edges are road segments (not access roads)
-                        if (not edge1_data.get('is_access_road', False) and 
-                            not edge2_data.get('is_access_road', False)):
-                            
+                        if not edge1_data.get(
+                            "is_access_road", False
+                        ) and not edge2_data.get("is_access_road", False):
+
                             # Remove split edges
                             self.road_graph.remove_edge(node_id, node1)
                             self.road_graph.remove_edge(node_id, node2)
-                            
+
                             # Restore original edge
-                            combined_distance = edge1_data['distance'] + edge2_data['distance']
-                            combined_time = edge1_data['travel_time'] + edge2_data['travel_time']
-                            
+                            combined_distance = (
+                                edge1_data["distance"] + edge2_data["distance"]
+                            )
+                            combined_time = (
+                                edge1_data["travel_time"] + edge2_data["travel_time"]
+                            )
+
                             self.road_graph.add_edge(
                                 node1,
                                 node2,
-                                edge_id=edge1_data.get('edge_id', '').replace('_part1', '').replace('_part2', ''),
+                                edge_id=edge1_data.get("edge_id", "")
+                                .replace("_part1", "")
+                                .replace("_part2", ""),
                                 distance=combined_distance,
-                                width=edge1_data.get('width', 6.0),
-                                lanes=edge1_data.get('lanes', 2),
-                                road_type=edge1_data.get('road_type', 'secondary'),
-                                speed_limit=edge1_data.get('speed_limit', 40.0),
+                                width=edge1_data.get("width", 6.0),
+                                lanes=edge1_data.get("lanes", 2),
+                                road_type=edge1_data.get("road_type", "secondary"),
+                                speed_limit=edge1_data.get("speed_limit", 40.0),
                                 travel_time=combined_time,
                                 weight=combined_time,
-                                original_width=edge1_data.get('original_width', edge1_data.get('width', 6.0))
+                                original_width=edge1_data.get(
+                                    "original_width", edge1_data.get("width", 6.0)
+                                ),
                             )
-                    
+
                     # Remove the virtual node
                     self.road_graph.remove_node(node_id)
-    
+
     def _astar_pathfinding(
         self,
         start_node: str,
         end_node: str,
         vehicle_config: VehicleConfig,
-        max_travel_time: Optional[float] = None
+        max_travel_time: Optional[float] = None,
     ) -> List[str]:
         """
         A* pathfinding algorithm with vehicle constraints and obstruction awareness.
-        
+
         Implements SE-2.2 requirements:
         - Cost based on road_length / speed_limit
         - Dynamic checking of vehicle width vs remaining road width
         - Infinite cost for impassable roads
-        
+
         Args:
             start_node: Starting node ID
             end_node: Destination node ID
             vehicle_config: Vehicle configuration for constraints
             max_travel_time: Maximum allowed travel time in seconds
-            
+
         Returns:
             List of node IDs forming the optimal path, empty if no path found
         """
         if start_node == end_node:
-            print(f"DEBUG: Start and end nodes are the same: {start_node}")
             return [start_node]
-        
-        print(f"DEBUG: A* starting with start={start_node}, end={end_node}")
-        print(f"DEBUG: Graph has {self.road_graph.number_of_nodes()} nodes, {self.road_graph.number_of_edges()} edges")
-        
+
         # Priority queue: (f_score, g_score, current_node, path)
         open_set = [(0, 0, start_node, [start_node])]
         closed_set: Set[str] = set()
-        
+
         # Best g_score for each node
         g_scores = {start_node: 0}
-        
+
         end_coords = (
-            self.road_graph.nodes[end_node]['x'],
-            self.road_graph.nodes[end_node]['y']
+            self.road_graph.nodes[end_node]["x"],
+            self.road_graph.nodes[end_node]["y"],
         )
-        
+
         iterations = 0
         while open_set:
             iterations += 1
-            if iterations % 100 == 0:
-                print(f"DEBUG: A* iteration {iterations}, open_set size: {len(open_set)}, closed_set size: {len(closed_set)}")
-            
             if iterations > 1000:  # Prevent infinite loops
-                print("DEBUG: A* stopping due to iteration limit")
                 break
             f_score, g_score, current_node, path = heapq.heappop(open_set)
-            
+
             if current_node in closed_set:
                 continue
-            
+
             closed_set.add(current_node)
-            
+
             if current_node == end_node:
-                print(f"DEBUG: A* found path! Length: {len(path)} nodes")
                 return path
-            
+
             # Check time constraint
             if max_travel_time and g_score > max_travel_time:
                 continue
-            
+
             # Explore neighbors
             for neighbor in self.road_graph.neighbors(current_node):
                 if neighbor in closed_set:
                     continue
-                
+
                 edge_data = self.road_graph[current_node][neighbor]
-                
+
                 # Check if vehicle can use this edge
                 if not self._can_vehicle_use_edge(vehicle_config, edge_data):
-                    if iterations <= 10:  # Only log first few iterations to avoid spam
-                        print(f"DEBUG: Vehicle cannot use edge {current_node}->{neighbor} (width: {edge_data.get('width', 'unknown')})")
                     continue
-                
+
                 # Calculate cost to move to neighbor
                 move_cost = self._calculate_edge_cost(
                     current_node, neighbor, vehicle_config
                 )
-                
+
                 tentative_g_score = g_score + move_cost
-                
-                if (neighbor not in g_scores or 
-                    tentative_g_score < g_scores[neighbor]):
-                    
+
+                if neighbor not in g_scores or tentative_g_score < g_scores[neighbor]:
+
                     g_scores[neighbor] = tentative_g_score
-                    
+
                     # Calculate heuristic (Euclidean distance)
                     neighbor_coords = (
-                        self.road_graph.nodes[neighbor]['x'],
-                        self.road_graph.nodes[neighbor]['y']
+                        self.road_graph.nodes[neighbor]["x"],
+                        self.road_graph.nodes[neighbor]["y"],
                     )
                     h_score = self._calculate_distance(neighbor_coords, end_coords)
-                    
+
                     f_score = tentative_g_score + h_score
-                    
+
                     new_path = path + [neighbor]
-                    heapq.heappush(open_set, (f_score, tentative_g_score, neighbor, new_path))
-        
-        # No path found
-        print(f"DEBUG: A* failed to find path after {iterations} iterations")
-        print(f"DEBUG: Final open_set size: {len(open_set)}, closed_set size: {len(closed_set)}")
-        if len(closed_set) < 5:
-            print(f"DEBUG: Nodes visited: {list(closed_set)}")
+                    heapq.heappush(
+                        open_set, (f_score, tentative_g_score, neighbor, new_path)
+                    )
+
         return []
-    
+
     def _can_vehicle_use_edge(
-        self,
-        vehicle_config: VehicleConfig,
-        edge_data: Dict[str, Any]
+        self, vehicle_config: VehicleConfig, edge_data: Dict[str, Any]
     ) -> bool:
         """
         Check if a vehicle can use a road edge given current obstructions.
-        
+
         Implements comprehensive vehicle constraint checking:
         - Road width vs vehicle width
         - Road type compatibility
         - Physical vehicle limitations
-        
+
         Args:
             vehicle_config: Vehicle configuration
             edge_data: Road edge data
-            
+
         Returns:
             True if vehicle can pass, False otherwise
         """
-        current_width = edge_data.get('width', 6.0)
+        current_width = edge_data.get("width", 6.0)
         min_required_width = vehicle_config.minimum_road_width
-        road_type = edge_data.get('road_type', 'secondary')
-        
+        road_type = edge_data.get("road_type", "secondary")
+
         # Basic width check
         if current_width < min_required_width:
             return False
-        
+
         # Road type compatibility check
-        if hasattr(vehicle_config, 'prohibited_road_types'):
+        if hasattr(vehicle_config, "prohibited_road_types"):
             if road_type in vehicle_config.prohibited_road_types:
                 return False
-        
+
         # Emergency vehicle special access (if implemented)
-        if (hasattr(vehicle_config, 'emergency_vehicle') and 
-            vehicle_config.emergency_vehicle and
-            current_width >= min_required_width * 0.8):  # 20% tolerance for emergency vehicles
+        if (
+            hasattr(vehicle_config, "emergency_vehicle")
+            and vehicle_config.emergency_vehicle
+            and current_width >= min_required_width * 0.8
+        ):  # 20% tolerance for emergency vehicles
             return True
-        
+
         # Tight passage warning threshold (for future enhancements)
         if current_width < min_required_width * 1.1:
             # Vehicle can pass but with difficulty - add penalty in cost calculation
             pass
-        
+
         return True
-    
+
     def _calculate_edge_cost(
-        self,
-        from_node: str,
-        to_node: str,
-        vehicle_config: VehicleConfig
+        self, from_node: str, to_node: str, vehicle_config: VehicleConfig
     ) -> float:
         """
         Calculate the cost of traversing an edge for a specific vehicle.
-        
+
         Implements SE-2.2 requirement: cost based on road_length / speed_limit
         with vehicle-specific constraints and obstruction penalties.
-        
+
         Args:
             from_node: Source node ID
             to_node: Destination node ID
             vehicle_config: Vehicle configuration
-            
+
         Returns:
             Edge traversal cost (travel time in seconds), or float('inf') if impassable
         """
         edge_data = self.road_graph[from_node][to_node]
-        
-        distance = edge_data['distance']
-        speed_limit = edge_data.get('speed_limit', 40.0)  # km/h
+
+        distance = edge_data["distance"]
+        speed_limit = edge_data.get("speed_limit", 40.0)  # km/h
         vehicle_max_speed = vehicle_config.max_speed
-        current_width = edge_data.get('width', 6.0)
+        current_width = edge_data.get("width", 6.0)
         min_required_width = vehicle_config.minimum_road_width
-        
+
         # SE-2.2: Check if vehicle can physically pass through
         if current_width < min_required_width:
-            return float('inf')  # Impassable - infinite cost
-        
+            return float("inf")  # Impassable - infinite cost
+
         # Calculate base travel time using SE-2.2 formula: distance / speed
         effective_speed = min(speed_limit, vehicle_max_speed)
-        
+
         # Convert km/h to m/s
         speed_ms = effective_speed * 1000 / 3600
         base_travel_time = distance / speed_ms
-        
+
         # Apply penalties for narrow passages and obstructions
-        width_ratio = current_width / edge_data.get('original_width', current_width)
-        
+        width_ratio = current_width / edge_data.get("original_width", current_width)
+
         if width_ratio < 0.5:
             # Severely obstructed - high time penalty
             base_travel_time *= 3.0
@@ -1048,272 +1001,270 @@ class NetworkAnalyzer:
         elif current_width < min_required_width * 1.2:
             # Tight fit - small penalty
             base_travel_time *= 1.3
-        
+
         return base_travel_time
-    
+
     def _calculate_distance(
-        self,
-        point1: Tuple[float, float],
-        point2: Tuple[float, float]
+        self, point1: Tuple[float, float], point2: Tuple[float, float]
     ) -> float:
         """Calculate Euclidean distance between two points."""
         dx = point2[0] - point1[0]
         dy = point2[1] - point1[1]
         return math.sqrt(dx * dx + dy * dy)
-    
+
     def _nodes_to_coordinates(self, path_nodes: List[str]) -> List[Tuple[float, float]]:
         """Convert a list of node IDs to coordinate tuples."""
         coordinates = []
         for node_id in path_nodes:
             node_data = self.road_graph.nodes[node_id]
-            coordinates.append((node_data['x'], node_data['y']))
+            coordinates.append((node_data["x"], node_data["y"]))
         return coordinates
-    
+
     def _calculate_path_distance(self, path_nodes: List[str]) -> float:
         """Calculate total distance of a path."""
         total_distance = 0.0
-        
+
         for i in range(len(path_nodes) - 1):
             from_node = path_nodes[i]
             to_node = path_nodes[i + 1]
             edge_data = self.road_graph[from_node][to_node]
-            total_distance += edge_data['distance']
-        
+            total_distance += edge_data["distance"]
+
         return total_distance
-    
+
     def _estimate_travel_time(
-        self,
-        path_nodes: List[str],
-        vehicle_config: VehicleConfig
+        self, path_nodes: List[str], vehicle_config: VehicleConfig
     ) -> float:
         """Estimate total travel time for a path."""
         total_time = 0.0
-        
+
         for i in range(len(path_nodes) - 1):
             from_node = path_nodes[i]
             to_node = path_nodes[i + 1]
             edge_cost = self._calculate_edge_cost(from_node, to_node, vehicle_config)
             total_time += edge_cost
-        
+
         return total_time
-    
+
     def _identify_blocked_roads_in_path(self, path_nodes: List[str]) -> List[str]:
         """Identify which roads in the path have obstructions."""
         blocked_roads = []
-        
+
         for i in range(len(path_nodes) - 1):
             from_node = path_nodes[i]
             to_node = path_nodes[i + 1]
-            
+
             edge_data = self.road_graph[from_node][to_node]
-            edge_id = edge_data.get('edge_id')
-            
+            edge_id = edge_data.get("edge_id")
+
             # Check if this edge has any obstructions
             for obstruction in self.road_obstructions.values():
                 if obstruction.road_edge_id == edge_id:
                     blocked_roads.append(edge_id)
                     break
-        
+
         return blocked_roads
-    
+
     def _find_edge_by_id(self, edge_id: str) -> Optional[Tuple[str, str]]:
         """Find an edge in the graph by its ID."""
         for u, v, data in self.road_graph.edges(data=True):
-            if data.get('edge_id') == edge_id:
+            if data.get("edge_id") == edge_id:
                 return (u, v)
         return None
-    
+
     def calculate_service_area(
         self,
         center_point: Tuple[float, float],
         vehicle_type: VehicleType,
-        max_travel_time: float
+        max_travel_time: float,
     ) -> List[Tuple[float, float]]:
         """
         Calculate service area (isochrone) from a center point.
-        
+
         Implements SE-2.2 isochrone generation using Dijkstra's algorithm
         to find all points reachable within specified travel time.
-        
+
         Args:
             center_point: Center coordinates (x, y)
             vehicle_type: Type of vehicle for constraints
             max_travel_time: Maximum travel time in seconds
-            
+
         Returns:
             List of coordinates forming the boundary of the service area
         """
         if not self.road_graph:
             return []
-        
+
         center_node = self._find_nearest_node(center_point)
         if not center_node:
             return []
-        
+
         vehicle_config = self.vehicle_configs.get(
-            vehicle_type,
-            DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
+            vehicle_type, DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
         )
-        
+
         # Use Dijkstra's algorithm to find all reachable nodes within time limit
         reachable_points = []
         distances = {center_node: 0.0}
         visited = set()
         queue = [(0.0, center_node)]  # (cumulative_time, node_id)
-        
+
         while queue:
             cumulative_time, current_node = heapq.heappop(queue)
-            
+
             if current_node in visited:
                 continue
-            
+
             visited.add(current_node)
-            
+
             # Add this node to reachable points
             node_data = self.road_graph.nodes[current_node]
-            reachable_points.append((node_data['x'], node_data['y']))
-            
+            reachable_points.append((node_data["x"], node_data["y"]))
+
             # Explore neighbors
             for neighbor in self.road_graph.neighbors(current_node):
                 if neighbor in visited:
                     continue
-                
+
                 edge_data = self.road_graph[current_node][neighbor]
-                
+
                 # Check vehicle compatibility
                 if not self._can_vehicle_use_edge(vehicle_config, edge_data):
                     continue
-                
+
                 # Calculate edge travel time
                 travel_time = self._calculate_edge_cost(
                     current_node, neighbor, vehicle_config
                 )
-                
+
                 # Skip if infinite cost (impassable)
-                if travel_time == float('inf'):
+                if travel_time == float("inf"):
                     continue
-                
+
                 total_time = cumulative_time + travel_time
-                
+
                 # Only process if within time limit and better than known distance
-                if (total_time <= max_travel_time and 
-                    (neighbor not in distances or total_time < distances[neighbor])):
+                if total_time <= max_travel_time and (
+                    neighbor not in distances or total_time < distances[neighbor]
+                ):
                     distances[neighbor] = total_time
                     heapq.heappush(queue, (total_time, neighbor))
-        
+
         # Generate service area boundary
         if len(reachable_points) < 3:
             return reachable_points
-        
+
         # Create convex hull for service area boundary
         try:
             from shapely.geometry import MultiPoint
+
             points = MultiPoint(reachable_points)
             convex_hull = points.convex_hull
-            
-            if hasattr(convex_hull, 'exterior'):
+
+            if hasattr(convex_hull, "exterior"):
                 return list(convex_hull.exterior.coords)
             else:
                 return reachable_points
-                
+
         except Exception:
             # Fallback to original points if convex hull fails
             return reachable_points
-    
+
     def calculate_multiple_isochrones(
         self,
         center_point: Tuple[float, float],
         vehicle_type: VehicleType,
-        time_intervals: List[float]
+        time_intervals: List[float],
     ) -> Dict[float, List[Tuple[float, float]]]:
         """
         Calculate multiple isochrones for different time intervals.
-        
+
         More efficient than calling calculate_service_area multiple times
         as it reuses the Dijkstra computation.
-        
+
         Args:
             center_point: Center coordinates (x, y)
             vehicle_type: Type of vehicle for constraints
             time_intervals: List of time intervals in seconds
-            
+
         Returns:
             Dictionary mapping time intervals to service area coordinates
         """
         if not self.road_graph or not time_intervals:
             return {}
-        
+
         center_node = self._find_nearest_node(center_point)
         if not center_node:
             return {}
-        
+
         vehicle_config = self.vehicle_configs.get(
-            vehicle_type,
-            DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
+            vehicle_type, DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
         )
-        
+
         # Sort time intervals for efficient processing
         sorted_intervals = sorted(time_intervals)
         max_time = max(sorted_intervals)
-        
+
         # Run single Dijkstra to find all reachable nodes
         distances = {center_node: 0.0}
         visited = set()
         queue = [(0.0, center_node)]
         node_times = {}  # node_id -> travel_time
-        
+
         while queue:
             cumulative_time, current_node = heapq.heappop(queue)
-            
+
             if current_node in visited or cumulative_time > max_time:
                 continue
-            
+
             visited.add(current_node)
             node_times[current_node] = cumulative_time
-            
+
             # Explore neighbors
             for neighbor in self.road_graph.neighbors(current_node):
                 if neighbor in visited:
                     continue
-                
+
                 edge_data = self.road_graph[current_node][neighbor]
-                
+
                 if not self._can_vehicle_use_edge(vehicle_config, edge_data):
                     continue
-                
+
                 travel_time = self._calculate_edge_cost(
                     current_node, neighbor, vehicle_config
                 )
-                
-                if travel_time == float('inf'):
+
+                if travel_time == float("inf"):
                     continue
-                
+
                 total_time = cumulative_time + travel_time
-                
-                if (total_time <= max_time and 
-                    (neighbor not in distances or total_time < distances[neighbor])):
+
+                if total_time <= max_time and (
+                    neighbor not in distances or total_time < distances[neighbor]
+                ):
                     distances[neighbor] = total_time
                     heapq.heappush(queue, (total_time, neighbor))
-        
+
         # Generate isochrones for each time interval
         isochrones = {}
-        
+
         for time_limit in sorted_intervals:
             reachable_points = []
-            
+
             for node_id, travel_time in node_times.items():
                 if travel_time <= time_limit:
                     node_data = self.road_graph.nodes[node_id]
-                    reachable_points.append((node_data['x'], node_data['y']))
-            
+                    reachable_points.append((node_data["x"], node_data["y"]))
+
             # Generate boundary for this time interval
             if len(reachable_points) >= 3:
                 try:
                     from shapely.geometry import MultiPoint
+
                     points = MultiPoint(reachable_points)
                     convex_hull = points.convex_hull
-                    
-                    if hasattr(convex_hull, 'exterior'):
+
+                    if hasattr(convex_hull, "exterior"):
                         isochrones[time_limit] = list(convex_hull.exterior.coords)
                     else:
                         isochrones[time_limit] = reachable_points
@@ -1321,154 +1272,165 @@ class NetworkAnalyzer:
                     isochrones[time_limit] = reachable_points
             else:
                 isochrones[time_limit] = reachable_points
-        
+
         return isochrones
-    
+
     def analyze_road_network_connectivity(
-        self,
-        vehicle_type: VehicleType
+        self, vehicle_type: VehicleType
     ) -> Dict[str, Any]:
         """
         Analyze road network connectivity for a specific vehicle type.
-        
+
         Useful for understanding how obstructions affect overall network accessibility.
-        
+
         Args:
             vehicle_type: Type of vehicle for analysis
-            
+
         Returns:
             Dictionary with connectivity statistics
         """
         if not self.road_graph:
             return {}
-        
+
         vehicle_config = self.vehicle_configs.get(
-            vehicle_type,
-            DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
+            vehicle_type, DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
         )
-        
+
         total_edges = 0
         passable_edges = 0
         blocked_edges = 0
         severely_obstructed_edges = 0
-        
+
         total_road_length = 0.0
         passable_road_length = 0.0
-        
+
         for u, v, edge_data in self.road_graph.edges(data=True):
             total_edges += 1
-            distance = edge_data.get('distance', 0.0)
+            distance = edge_data.get("distance", 0.0)
             total_road_length += distance
-            
-            current_width = edge_data.get('width', 6.0)
-            original_width = edge_data.get('original_width', current_width)
+
+            current_width = edge_data.get("width", 6.0)
+            original_width = edge_data.get("original_width", current_width)
             min_required_width = vehicle_config.minimum_road_width
-            
+
             if current_width >= min_required_width:
                 passable_edges += 1
                 passable_road_length += distance
-                
+
                 # Check obstruction level
                 width_ratio = current_width / original_width
                 if width_ratio < 0.5:
                     severely_obstructed_edges += 1
             else:
                 blocked_edges += 1
-        
+
         # Calculate connected components for passable roads
         passable_graph = self.road_graph.copy()
         edges_to_remove = []
-        
+
         for u, v, edge_data in passable_graph.edges(data=True):
-            current_width = edge_data.get('width', 6.0)
+            current_width = edge_data.get("width", 6.0)
             if current_width < vehicle_config.minimum_road_width:
                 edges_to_remove.append((u, v))
-        
+
         passable_graph.remove_edges_from(edges_to_remove)
-        
+
         import networkx as nx
+
         connected_components = list(nx.connected_components(passable_graph))
-        
+
         return {
-            'vehicle_type': vehicle_type.value,
-            'total_edges': total_edges,
-            'passable_edges': passable_edges,
-            'blocked_edges': blocked_edges,
-            'severely_obstructed_edges': severely_obstructed_edges,
-            'passability_percentage': (passable_edges / total_edges * 100) if total_edges > 0 else 0,
-            'total_road_length_km': total_road_length / 1000,
-            'passable_road_length_km': passable_road_length / 1000,
-            'connected_components': len(connected_components),
-            'largest_component_size': max(len(comp) for comp in connected_components) if connected_components else 0,
-            'network_fragmentation': len(connected_components) > 1
+            "vehicle_type": vehicle_type.value,
+            "total_edges": total_edges,
+            "passable_edges": passable_edges,
+            "blocked_edges": blocked_edges,
+            "severely_obstructed_edges": severely_obstructed_edges,
+            "passability_percentage": (
+                (passable_edges / total_edges * 100) if total_edges > 0 else 0
+            ),
+            "total_road_length_km": total_road_length / 1000,
+            "passable_road_length_km": passable_road_length / 1000,
+            "connected_components": len(connected_components),
+            "largest_component_size": (
+                max(len(comp) for comp in connected_components)
+                if connected_components
+                else 0
+            ),
+            "network_fragmentation": len(connected_components) > 1,
         }
-    
+
     def find_alternative_paths(
         self,
         request: PathfindingRequest,
         max_alternatives: int = 3,
-        diversity_factor: float = 1.5
+        diversity_factor: float = 1.5,
     ) -> List[PathfindingResult]:
         """
         Find multiple alternative paths between two points.
-        
+
         Useful for emergency response planning and route redundancy analysis.
         Uses a modified A* with edge penalty increases to find diverse routes.
-        
+
         Args:
             request: PathfindingRequest with start/end points and vehicle type
             max_alternatives: Maximum number of alternative paths to find
             diversity_factor: Factor to increase cost of previously used edges
-            
+
         Returns:
             List of PathfindingResult objects, ordered by cost
         """
         if not self.road_graph:
             return []
-        
+
         vehicle_config = self.vehicle_configs.get(
-            request.vehicle_type,
-            DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
+            request.vehicle_type, DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
         )
-        
+
         alternatives = []
         edge_usage_count = {}  # Track how many times each edge has been used
-        
+
         # Find nearest nodes
         start_node = self._find_nearest_node(request.start_point)
         end_node = self._find_nearest_node(request.end_point)
-        
+
         if not start_node or not end_node:
             return []
-        
+
         for attempt in range(max_alternatives):
             # Create modified cost function with edge penalties
             def get_modified_edge_cost(from_node: str, to_node: str) -> float:
-                base_cost = self._calculate_edge_cost(from_node, to_node, vehicle_config)
-                
-                if base_cost == float('inf'):
+                base_cost = self._calculate_edge_cost(
+                    from_node, to_node, vehicle_config
+                )
+
+                if base_cost == float("inf"):
                     return base_cost
-                
+
                 # Add penalty for previously used edges
                 edge_key = (from_node, to_node)
                 reverse_key = (to_node, from_node)
-                usage = edge_usage_count.get(edge_key, 0) + edge_usage_count.get(reverse_key, 0)
-                
+                usage = edge_usage_count.get(edge_key, 0) + edge_usage_count.get(
+                    reverse_key, 0
+                )
+
                 if usage > 0:
                     penalty = base_cost * (diversity_factor - 1.0) * usage
                     return base_cost + penalty
-                
+
                 return base_cost
-            
+
             # Find path with modified costs
             path_nodes = self._astar_pathfinding_with_custom_cost(
-                start_node, end_node, vehicle_config, 
-                request.max_travel_time, get_modified_edge_cost
+                start_node,
+                end_node,
+                vehicle_config,
+                request.max_travel_time,
+                get_modified_edge_cost,
             )
-            
+
             if not path_nodes:
                 break  # No more paths found
-            
+
             # Check if this path is significantly different
             if self._is_path_sufficiently_different(path_nodes, alternatives):
                 # Convert to PathfindingResult
@@ -1476,12 +1438,12 @@ class NetworkAnalyzer:
                 total_distance = self._calculate_path_distance(path_nodes)
                 travel_time = self._estimate_travel_time(path_nodes, vehicle_config)
                 blocked_roads = self._identify_blocked_roads_in_path(path_nodes)
-                
+
                 # Add actual start and end points
                 if path_coordinates:
                     path_coordinates[0] = request.start_point
                     path_coordinates[-1] = request.end_point
-                
+
                 alternative = PathfindingResult(
                     success=True,
                     path_coordinates=path_coordinates,
@@ -1489,145 +1451,146 @@ class NetworkAnalyzer:
                     total_distance=total_distance,
                     estimated_travel_time=travel_time,
                     vehicle_type=request.vehicle_type,
-                    blocked_roads=blocked_roads
+                    blocked_roads=blocked_roads,
                 )
-                
+
                 alternatives.append(alternative)
-                
+
                 # Update edge usage count
                 for i in range(len(path_nodes) - 1):
                     edge_key = (path_nodes[i], path_nodes[i + 1])
                     edge_usage_count[edge_key] = edge_usage_count.get(edge_key, 0) + 1
-            
+
             else:
                 # Path too similar, stop searching
                 break
-        
+
         return alternatives
-    
+
     def _astar_pathfinding_with_custom_cost(
         self,
         start_node: str,
         end_node: str,
         vehicle_config: VehicleConfig,
         max_travel_time: Optional[float],
-        cost_function
+        cost_function,
     ) -> List[str]:
         """
         A* pathfinding with custom cost function for alternative path finding.
-        
+
         Args:
             start_node: Starting node ID
             end_node: Destination node ID
             vehicle_config: Vehicle configuration
             max_travel_time: Maximum allowed travel time
             cost_function: Custom function to calculate edge costs
-            
+
         Returns:
             List of node IDs forming the path
         """
         if start_node == end_node:
             return [start_node]
-        
+
         # Priority queue: (f_score, g_score, current_node, path)
         open_set = [(0, 0, start_node, [start_node])]
         closed_set: Set[str] = set()
         g_scores = {start_node: 0}
-        
+
         end_coords = (
-            self.road_graph.nodes[end_node]['x'],
-            self.road_graph.nodes[end_node]['y']
+            self.road_graph.nodes[end_node]["x"],
+            self.road_graph.nodes[end_node]["y"],
         )
-        
+
         while open_set:
             f_score, g_score, current_node, path = heapq.heappop(open_set)
-            
+
             if current_node in closed_set:
                 continue
-            
+
             closed_set.add(current_node)
-            
+
             if current_node == end_node:
                 return path
-            
+
             if max_travel_time and g_score > max_travel_time:
                 continue
-            
+
             for neighbor in self.road_graph.neighbors(current_node):
                 if neighbor in closed_set:
                     continue
-                
+
                 edge_data = self.road_graph[current_node][neighbor]
-                
+
                 if not self._can_vehicle_use_edge(vehicle_config, edge_data):
                     continue
-                
+
                 # Use custom cost function
                 move_cost = cost_function(current_node, neighbor)
-                
-                if move_cost == float('inf'):
+
+                if move_cost == float("inf"):
                     continue
-                
+
                 tentative_g_score = g_score + move_cost
-                
-                if (neighbor not in g_scores or 
-                    tentative_g_score < g_scores[neighbor]):
-                    
+
+                if neighbor not in g_scores or tentative_g_score < g_scores[neighbor]:
+
                     g_scores[neighbor] = tentative_g_score
-                    
+
                     neighbor_coords = (
-                        self.road_graph.nodes[neighbor]['x'],
-                        self.road_graph.nodes[neighbor]['y']
+                        self.road_graph.nodes[neighbor]["x"],
+                        self.road_graph.nodes[neighbor]["y"],
                     )
                     h_score = self._calculate_distance(neighbor_coords, end_coords)
-                    
+
                     f_score = tentative_g_score + h_score
                     new_path = path + [neighbor]
-                    heapq.heappush(open_set, (f_score, tentative_g_score, neighbor, new_path))
-        
+                    heapq.heappush(
+                        open_set, (f_score, tentative_g_score, neighbor, new_path)
+                    )
+
         return []
-    
+
     def _is_path_sufficiently_different(
         self,
         new_path: List[str],
         existing_paths: List[PathfindingResult],
-        min_difference_ratio: float = 0.3
+        min_difference_ratio: float = 0.3,
     ) -> bool:
         """
         Check if a new path is sufficiently different from existing paths.
-        
+
         Args:
             new_path: New path as list of node IDs
             existing_paths: List of existing PathfindingResult objects
             min_difference_ratio: Minimum ratio of different edges required
-            
+
         Returns:
             True if path is sufficiently different
         """
         if not existing_paths:
             return True
-        
+
         new_path_edges = set()
         for i in range(len(new_path) - 1):
             edge = (new_path[i], new_path[i + 1])
             new_path_edges.add(edge)
             new_path_edges.add((edge[1], edge[0]))  # Add reverse edge
-        
+
         for existing in existing_paths:
             existing_edges = set()
             existing_path = existing.path_node_ids
-            
+
             for i in range(len(existing_path) - 1):
                 edge = (existing_path[i], existing_path[i + 1])
                 existing_edges.add(edge)
                 existing_edges.add((edge[1], edge[0]))  # Add reverse edge
-            
+
             # Calculate overlap ratio
             common_edges = new_path_edges.intersection(existing_edges)
             if len(new_path_edges) > 0:
                 difference_ratio = 1.0 - (len(common_edges) / len(new_path_edges))
-                
+
                 if difference_ratio < min_difference_ratio:
                     return False  # Too similar to existing path
-        
+
         return True

@@ -105,9 +105,7 @@ class BuildingGenerator:
             
         Returns:
             Dict[str, Building]: Dictionary of building_id -> Building objects
-        """
-        print("🏗️ Starting building generation (WS-1.5)...")
-        
+        """        
         # Create exclusion zones for roads and existing facilities
         exclusion_zones = self._create_exclusion_zones(map_data)
         
@@ -132,7 +130,6 @@ class BuildingGenerator:
             buildings[building.id] = building
             total_population += building.population
         
-        print(f"✅ Generated {len(buildings)} buildings with {total_population} total population")
         return buildings
     
     def _create_exclusion_zones(self, map_data) -> List[Polygon]:
