@@ -626,6 +626,7 @@ const useSimulationStore = create((set, get) => ({
         end_point: routePlanning.endPoint,
         vehicle_type: routePlanning.vehicleType,
         max_travel_time: routePlanning.maxTravelTime,
+        find_alternatives: routePlanning.findAlternatives,
         simulation_id: null // Pre-disaster route first
       };
 

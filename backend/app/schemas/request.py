@@ -192,6 +192,11 @@ class PathfindingRequest(BaseModel):
         description="Maximum travel time in seconds (None for no limit)"
     )
     
+    find_alternatives: bool = Field(
+        default=False,
+        description="Whether to find alternative routes"
+    )
+    
     class Config:
         json_schema_extra = {
             "example": {
@@ -200,7 +205,8 @@ class PathfindingRequest(BaseModel):
                 "start_point": [500.0, 500.0],
                 "end_point": [1500.0, 1200.0],
                 "vehicle_type": "ambulance",
-                "max_travel_time": 900.0
+                "max_travel_time": 900.0,
+                "find_alternatives": True
             }
         }
 

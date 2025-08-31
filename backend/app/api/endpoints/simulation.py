@@ -228,7 +228,7 @@ async def find_path(request: PathfindingRequest):
         
         # Optionally find alternative routes if the main path succeeded
         alternative_routes = []
-        if result.success and getattr(request, 'find_alternatives', False):
+        if result.success and request.find_alternatives:
             try:
                 alternatives = network_analyzer.find_alternative_paths(
                     pathfinding_request, max_alternatives=2, diversity_factor=1.5

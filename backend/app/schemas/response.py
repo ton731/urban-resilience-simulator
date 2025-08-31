@@ -327,9 +327,9 @@ class PathfindingResponse(BaseModel):
     
     # Path analysis
     blocked_roads: List[str] = Field(description="List of road edge IDs that were blocked and avoided")
-    alternative_routes: Optional[int] = Field(
-        default=None,
-        description="Number of alternative routes found (if applicable)"
+    alternative_routes: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="List of alternative routes with their details"
     )
     
     class Config:
