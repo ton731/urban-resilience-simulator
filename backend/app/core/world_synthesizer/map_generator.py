@@ -426,38 +426,27 @@ class MapGenerator:
         # Decide directionality for this entire alley (consistent throughout)
         is_bidirectional = random.random() > 0.3  # 70% chance bidirectional
         
+        # Start with straight horizontal alley
         if is_full_length:
-            # Full-length alley: must connect to actual main road nodes
-            start_node = self._find_closest_main_road_node(map_data, block_left, alley_y)
-            end_node = self._find_closest_main_road_node(map_data, block_right, alley_y)
-            
-            if start_node and end_node:
-                start_x, start_y = start_node.x, start_node.y
-                end_x, end_y = end_node.x, end_node.y
-            else:
-                # Fallback to block boundaries
-                start_x, end_x = block_left, block_right
-                start_y = end_y = alley_y
+            # Full-length alley: spans from left to right boundary
+            start_x, end_x = block_left, block_right
+            start_y = end_y = alley_y
         else:
-            # Partial-length alley: extends from one main road into the block
+            # Partial-length alley: extends from one side into the block
             if random.random() < 0.5:
-                # Extend from left main road
-                start_node = self._find_closest_main_road_node(map_data, block_left, alley_y)
-                start_x = start_node.x if start_node else block_left
-                start_y = start_node.y if start_node else alley_y
+                # Extend from left boundary
+                start_x = block_left
                 end_x = block_left + random.uniform(0.3, 0.8) * (block_right - block_left)
-                end_y = alley_y
             else:
-                # Extend from right main road
-                end_node = self._find_closest_main_road_node(map_data, block_right, alley_y)
-                end_x = end_node.x if end_node else block_right
-                end_y = end_node.y if end_node else alley_y
+                # Extend from right boundary
+                end_x = block_right
                 start_x = block_right - random.uniform(0.3, 0.8) * (block_right - block_left)
-                start_y = alley_y
+            
+            start_y = end_y = alley_y
         
-        # 20% chance to add slight tilt (up to 30 degrees)
-        if random.random() < 0.2 and not is_full_length:  # Only tilt partial alleys
-            max_tilt_angle = math.radians(30)  # Convert to radians
+        # 30% chance to add slight tilt (up to 20 degrees) - only for partial alleys
+        if random.random() < 0.3 and not is_full_length:  # 30% chance for tilt
+            max_tilt_angle = math.radians(20)  # 20 degrees maximum
             tilt_angle = random.uniform(-max_tilt_angle, max_tilt_angle)
             
             # Calculate Y offset based on X distance and tilt angle
@@ -465,19 +454,19 @@ class MapGenerator:
             y_offset = x_distance * math.tan(tilt_angle)
             
             # Ensure tilted alley stays within block boundaries
-            if end_y + y_offset > block_top:
-                y_offset = block_top - end_y - 10  # Small buffer
-            elif end_y + y_offset < block_bottom:
-                y_offset = block_bottom - end_y + 10  # Small buffer
+            if alley_y + y_offset > block_top - 10:
+                y_offset = block_top - alley_y - 10  # Small buffer
+            elif alley_y + y_offset < block_bottom + 10:
+                y_offset = block_bottom - alley_y + 10  # Small buffer
             
-            end_y = end_y + y_offset
+            end_y = alley_y + y_offset
         
         # Check if road would have zero length (avoid NaN in frontend)
         road_length = math.sqrt((end_x - start_x) ** 2 + (end_y - start_y) ** 2)
         if road_length < 5:  # Minimum 5 meters
             return  # Skip this alley
         
-        # Always create new nodes for alleys to avoid same node issues
+        # Create nodes at block boundaries for better connectivity
         start_node_id = str(uuid.uuid4())
         end_node_id = str(uuid.uuid4())
         
@@ -511,38 +500,27 @@ class MapGenerator:
         # Decide directionality for this entire alley (consistent throughout)
         is_bidirectional = random.random() > 0.3  # 70% chance bidirectional
         
+        # Start with straight vertical alley
         if is_full_length:
-            # Full-length alley: must connect to actual main road nodes
-            start_node = self._find_closest_main_road_node(map_data, alley_x, block_bottom)
-            end_node = self._find_closest_main_road_node(map_data, alley_x, block_top)
-            
-            if start_node and end_node:
-                start_x, start_y = start_node.x, start_node.y
-                end_x, end_y = end_node.x, end_node.y
-            else:
-                # Fallback to block boundaries
-                start_x = end_x = alley_x
-                start_y, end_y = block_bottom, block_top
+            # Full-length alley: spans from bottom to top boundary
+            start_x = end_x = alley_x
+            start_y, end_y = block_bottom, block_top
         else:
-            # Partial-length alley: extends from one main road into the block
+            # Partial-length alley: extends from one side into the block
             if random.random() < 0.5:
-                # Extend from bottom main road
-                start_node = self._find_closest_main_road_node(map_data, alley_x, block_bottom)
-                start_x = start_node.x if start_node else alley_x
-                start_y = start_node.y if start_node else block_bottom
-                end_x = alley_x
+                # Extend from bottom boundary
+                start_y = block_bottom
                 end_y = block_bottom + random.uniform(0.3, 0.8) * (block_top - block_bottom)
             else:
-                # Extend from top main road
-                end_node = self._find_closest_main_road_node(map_data, alley_x, block_top)
-                end_x = end_node.x if end_node else alley_x
-                end_y = end_node.y if end_node else block_top
-                start_x = alley_x
+                # Extend from top boundary
+                end_y = block_top
                 start_y = block_top - random.uniform(0.3, 0.8) * (block_top - block_bottom)
+            
+            start_x = end_x = alley_x
         
-        # 20% chance to add slight tilt (up to 30 degrees)
-        if random.random() < 0.2 and not is_full_length:  # Only tilt partial alleys
-            max_tilt_angle = math.radians(30)  # Convert to radians
+        # 30% chance to add slight tilt (up to 20 degrees) - only for partial alleys
+        if random.random() < 0.3 and not is_full_length:  # 30% chance for tilt
+            max_tilt_angle = math.radians(20)  # 20 degrees maximum
             tilt_angle = random.uniform(-max_tilt_angle, max_tilt_angle)
             
             # Calculate X offset based on Y distance and tilt angle
@@ -550,19 +528,19 @@ class MapGenerator:
             x_offset = y_distance * math.tan(tilt_angle)
             
             # Ensure tilted alley stays within block boundaries
-            if end_x + x_offset > block_right:
-                x_offset = block_right - end_x - 10  # Small buffer
-            elif end_x + x_offset < block_left:
-                x_offset = block_left - end_x + 10  # Small buffer
+            if alley_x + x_offset > block_right - 10:
+                x_offset = block_right - alley_x - 10  # Small buffer
+            elif alley_x + x_offset < block_left + 10:
+                x_offset = block_left - alley_x + 10  # Small buffer
             
-            end_x = end_x + x_offset
+            end_x = alley_x + x_offset
         
         # Check if road would have zero length (avoid NaN in frontend)
         road_length = math.sqrt((end_x - start_x) ** 2 + (end_y - start_y) ** 2)
         if road_length < 5:  # Minimum 5 meters
             return  # Skip this alley
         
-        # Always create new nodes for alleys to avoid same node issues  
+        # Create nodes at block boundaries for better connectivity
         start_node_id = str(uuid.uuid4())
         end_node_id = str(uuid.uuid4())
         
