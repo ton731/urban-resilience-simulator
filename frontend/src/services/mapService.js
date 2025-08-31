@@ -645,27 +645,41 @@ class MapService {
       const lat = (building.y - centerY) * metersToLat;
       const lng = (building.x - centerX) * metersToLng;
 
-      // Create building marker based on type
-      const buildingMarker = this._createBuildingIcon([lat, lng], building);
+      // Create building marker based on type (now returns rectangle scaled by footprint area)
+      const buildingMarker = this._createBuildingIcon([lat, lng], building, metersToLat, metersToLng);
 
-      // Create detailed popup
-      buildingMarker.bindPopup(`
+      // Create detailed popup content
+      const popupContent = `
         <div style="font-family: monospace; min-width: 240px;">
           <strong>${this._getBuildingEmoji(building.building_type)} ${this._getBuildingTypeName(building.building_type)}</strong><br/>
           <hr style="margin: 8px 0;">
           <strong>位置 Position:</strong> (${building.x.toFixed(1)}, ${building.y.toFixed(1)})<br/>
           <strong>樓高 Height:</strong> ${building.height.toFixed(1)}m<br/>
           <strong>樓層 Floors:</strong> ${building.floors}<br/>
-          <strong>佔地面積 Footprint:</strong> ${building.footprint_area.toFixed(0)}m²<br/>
+          <strong>佔地面積 Footprint:</strong> ${building.footprint_area.toFixed(0)}m² (${Math.sqrt(building.footprint_area).toFixed(1)}m × ${Math.sqrt(building.footprint_area).toFixed(1)}m)<br/>
           <strong>人口 Population:</strong> ${building.population} 人<br/>
           <strong>容量 Capacity:</strong> ${building.capacity} 人<br/>
           <strong>使用率 Occupancy:</strong> ${((building.population / building.capacity) * 100).toFixed(1)}%<br/>
           <hr style="margin: 8px 0;">
           <small style="color: #666;">
-            ${this._getBuildingDescription(building.building_type)}
+            ${this._getBuildingDescription(building.building_type)}<br/>
+            📐 建築物按實際佔地面積等比例顯示
           </small>
         </div>
-      `);
+      `;
+
+      // Bind popup to building marker (works for both single markers and layer groups)
+      if (buildingMarker instanceof L.LayerGroup) {
+        // For layer groups, bind popup to each layer
+        buildingMarker.eachLayer(layer => {
+          if (layer instanceof L.Rectangle || layer instanceof L.Marker) {
+            layer.bindPopup(popupContent);
+          }
+        });
+      } else {
+        // For single markers/rectangles
+        buildingMarker.bindPopup(popupContent);
+      }
 
       // Add to appropriate layers
       this.layers.buildings.addLayer(buildingMarker);
@@ -689,88 +703,126 @@ class MapService {
   }
 
   /**
-   * Create building icon based on type
+   * Create building rectangle based on footprint area
    * @param {Array} position - [lat, lng] position for building
    * @param {Object} building - Building data object
-   * @returns {Object} - Leaflet marker with building icon
+   * @param {number} metersToLat - Conversion factor for latitude
+   * @param {number} metersToLng - Conversion factor for longitude
+   * @returns {Object} - Leaflet rectangle representing the building
    */
-  _createBuildingIcon(position, building) {
+  _createBuildingIcon(position, building, metersToLat, metersToLng) {
     // Define building colors and styles by type
     const buildingStyles = {
       residential: {
-        backgroundColor: '#3b82f6', // Blue
-        borderColor: '#1e40af',
-        icon: '🏘️',
-        size: 16
+        fillColor: '#3b82f6', // Blue
+        color: '#1e40af',
+        icon: '🏘️'
       },
       commercial: {
-        backgroundColor: '#f59e0b', // Amber
-        borderColor: '#d97706',
-        icon: '🏢',
-        size: 18
+        fillColor: '#f59e0b', // Amber
+        color: '#d97706',
+        icon: '🏢'
       },
       mixed: {
-        backgroundColor: '#8b5cf6', // Purple
-        borderColor: '#7c3aed',
-        icon: '🏬',
-        size: 17
+        fillColor: '#8b5cf6', // Purple
+        color: '#7c3aed',
+        icon: '🏬'
       },
       industrial: {
-        backgroundColor: '#6b7280', // Gray
-        borderColor: '#4b5563',
-        icon: '🏭',
-        size: 19
+        fillColor: '#6b7280', // Gray
+        color: '#4b5563',
+        icon: '🏭'
       }
     };
 
     const style = buildingStyles[building.building_type] || buildingStyles.residential;
     
-    // Scale size based on building height (taller buildings are larger icons)
-    const heightFactor = Math.min(2.0, Math.max(0.8, building.height / 20)); // Scale between 0.8x and 2x
-    const adjustedSize = Math.round(style.size * heightFactor);
-
-    const buildingIcon = L.divIcon({
-      html: `
-        <div style="
-          width: ${adjustedSize}px;
-          height: ${adjustedSize}px;
-          background-color: ${style.backgroundColor};
-          border: 2px solid ${style.borderColor};
-          border-radius: 3px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: ${adjustedSize * 0.6}px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-          position: relative;
-        ">
-          ${style.icon}
-          ${building.population > 0 ? `
-            <div style="
-              position: absolute;
-              top: -8px;
-              right: -8px;
-              background-color: white;
-              color: ${style.backgroundColor};
-              border: 1px solid ${style.borderColor};
-              border-radius: 8px;
-              padding: 1px 4px;
-              font-size: 9px;
-              font-weight: bold;
-              min-width: 14px;
-              text-align: center;
-              line-height: 1;
-            ">${building.population > 99 ? '99+' : building.population}</div>
-          ` : ''}
-        </div>
-      `,
-      className: 'building-icon',
-      iconSize: [adjustedSize, adjustedSize],
-      iconAnchor: [adjustedSize/2, adjustedSize/2],
-      popupAnchor: [0, -adjustedSize/2]
+    // Calculate building dimensions based on footprint area
+    // Assume building is a square for simplicity: side_length = sqrt(area)
+    const sideLength = Math.sqrt(building.footprint_area); // meters
+    
+    // Convert meters to lat/lng offsets
+    const halfSideLat = (sideLength / 2) * metersToLat;
+    const halfSideLng = (sideLength / 2) * metersToLng;
+    
+    // Create rectangle bounds
+    const bounds = [
+      [position[0] - halfSideLat, position[1] - halfSideLng], // Southwest corner
+      [position[0] + halfSideLat, position[1] + halfSideLng]  // Northeast corner
+    ];
+    
+    // Create building rectangle
+    const buildingRectangle = L.rectangle(bounds, {
+      fillColor: style.fillColor,
+      color: style.color,
+      fillOpacity: 0.7,
+      weight: 2,
+      opacity: 0.9
     });
 
-    return L.marker(position, { icon: buildingIcon });
+    // Add building icon in the center if the building is large enough
+    if (sideLength >= 10) { // Only show icon for buildings >= 10m side length
+      // Calculate icon size more proportionally to building size
+      // For buildings 10-50m: icon size ranges from 16px to 48px
+      const iconSize = Math.min(48, Math.max(16, sideLength * 1.2)); // Icon size based on building size
+      
+      const centerIcon = L.marker(position, {
+        icon: L.divIcon({
+          html: `
+            <div style="
+              width: ${iconSize}px;
+              height: ${iconSize}px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: ${iconSize * 0.7}px;
+              text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+              pointer-events: none;
+            ">
+              ${style.icon}
+            </div>
+          `,
+          className: 'building-center-icon',
+          iconSize: [iconSize, iconSize],
+          iconAnchor: [iconSize/2, iconSize/2]
+        })
+      });
+      
+      // Create a layer group containing both rectangle and icon
+      const buildingGroup = L.layerGroup([buildingRectangle, centerIcon]);
+      
+      // Add population indicator if there are people
+      if (building.population > 0) {
+        const popIndicator = L.marker([position[0] + halfSideLat * 0.7, position[1] + halfSideLng * 0.7], {
+          icon: L.divIcon({
+            html: `
+              <div style="
+                background-color: white;
+                color: ${style.fillColor};
+                border: 2px solid ${style.color};
+                border-radius: 10px;
+                padding: 2px 6px;
+                font-size: 11px;
+                font-weight: bold;
+                text-align: center;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                white-space: nowrap;
+              ">${building.population > 99 ? '99+' : building.population}人</div>
+            `,
+            className: 'building-population',
+            iconSize: [30, 20],
+            iconAnchor: [15, 10]
+          })
+        });
+        
+        buildingGroup.addLayer(popIndicator);
+      }
+      
+      return buildingGroup;
+    } else {
+      // For small buildings, just return the rectangle
+      return buildingRectangle;
+    }
   }
 
   /**
