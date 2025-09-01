@@ -182,6 +182,23 @@ export const simulationAPI = {
   }
 };
 
+// Impact Analysis API (IA-3.1)
+export const impactAnalysisAPI = {
+  /**
+   * Analyze ambulance service coverage and response times
+   * @param {Object} config - Analysis configuration
+   * @returns {Promise} - Analysis results with grid data
+   */
+  analyzeAmbulanceService: async (config) => {
+    try {
+      const response = await apiClient.post('/impact/ambulance-service-analysis', config);
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to analyze ambulance service: ${error.response?.data?.detail || error.message}`);
+    }
+  }
+};
+
 // Health check API
 export const healthAPI = {
   /**

@@ -3,6 +3,7 @@ import useSimulationStore from '../../store/useSimulationStore';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
 import mapService from '../../services/mapService';
+import { impactAnalysisAPI } from '../../api/apiClient';
 
 const AmbulanceServicePanel = () => {
   const {
@@ -99,21 +100,9 @@ const AmbulanceServicePanel = () => {
 
       console.log('🚑 開始救護車服務分析...', requestBody);
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/impact/ambulance-service-analysis`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || '分析失敗');
-      }
-
-      const result = await response.json();
+      const result = await impactAnalysisAPI.analyzeAmbulanceService(requestBody);
       console.log('✅ 救護車服務分析完成:', result);
+      console.log('🔍 調試：網格數據樣本:', result.grid_cells?.[0]);
       
       setAnalysisResult(result);
       

@@ -2039,9 +2039,15 @@ class MapService {
     const halfGridLng = (gridSize / 2) * metersToLng;
 
     analysisData.grid_cells.forEach(cell => {
+      // Check if cell has valid center coordinates
+      if (typeof cell.center_x !== 'number' || typeof cell.center_y !== 'number') {
+        console.error('❌ 無效的網格單元數據 - 缺少座標:', cell);
+        return;
+      }
+      
       // Convert cell center to lat/lng
-      const centerLat = (cell.center_point[1] - centerY) * metersToLat;
-      const centerLng = (cell.center_point[0] - centerX) * metersToLng;
+      const centerLat = (cell.center_y - centerY) * metersToLat;
+      const centerLng = (cell.center_x - centerX) * metersToLng;
 
       // Create grid cell rectangle
       const bounds = [
@@ -2075,19 +2081,28 @@ class MapService {
    * @returns {string} - Hex color code
    */
   _getServiceLevelColor(cell, colorLegend) {
-    // Check if cell is reachable
-    if (!cell.is_reachable) {
+    // Use the color_code from the backend response if available
+    if (cell.color_code) {
+      return cell.color_code;
+    }
+
+    // Fallback: Check accessibility level
+    const accessibilityLevel = cell.accessibility_level;
+    if (accessibilityLevel === 'unreachable') {
       return colorLegend.unreachable || '#808080';
     }
 
-    // Use response time to determine service level
-    const responseTime = cell.response_time_seconds;
+    // Fallback: Use service time to determine service level
+    const serviceTime = cell.service_time_seconds;
+    if (serviceTime === null || serviceTime === undefined) {
+      return colorLegend.unreachable || '#808080';
+    }
     
-    if (responseTime <= 300) { // ≤5 minutes
+    if (serviceTime <= 300) { // ≤5 minutes
       return colorLegend.excellent || '#22c55e';
-    } else if (responseTime <= 600) { // 5-10 minutes  
+    } else if (serviceTime <= 600) { // 5-10 minutes  
       return colorLegend.good || '#eab308';
-    } else if (responseTime <= 900) { // 10-15 minutes
+    } else if (serviceTime <= 900) { // 10-15 minutes
       return colorLegend.fair || '#f97316';
     } else { // >15 minutes
       return colorLegend.poor || '#ef4444';
@@ -2101,23 +2116,30 @@ class MapService {
    * @returns {string} - HTML content for popup
    */
   _createGridCellPopup(cell, analysisMode) {
-    const isReachable = cell.is_reachable;
-    const responseTime = cell.response_time_seconds;
-    const serviceLevel = this._getServiceLevelText(responseTime);
+    const isReachable = cell.accessibility_level !== 'unreachable';
+    const serviceTime = cell.service_time_seconds;
+    const serviceLevel = this._getServiceLevelText(serviceTime);
 
     let content = `
       <div style="font-family: monospace; min-width: 200px;">
         <strong>🚑 救護車服務範圍</strong><br/>
         <hr style="margin: 8px 0;">
-        <strong>座標:</strong> (${cell.center_point[0].toFixed(1)}, ${cell.center_point[1].toFixed(1)})<br/>
+        <strong>網格ID:</strong> ${cell.grid_id}<br/>
+        <strong>座標:</strong> (${cell.center_x.toFixed(1)}, ${cell.center_y.toFixed(1)})<br/>
         <strong>可到達:</strong> ${isReachable ? '✅ 是' : '❌ 否'}<br/>
+        <strong>服務等級:</strong> ${cell.accessibility_level}<br/>
     `;
 
-    if (isReachable) {
+    if (isReachable && serviceTime !== null) {
       content += `
-        <strong>響應時間:</strong> ${Math.round(responseTime / 60)}分鐘 (${responseTime.toFixed(1)}秒)<br/>
-        <strong>服務等級:</strong> ${serviceLevel}<br/>
-        <strong>最近站點:</strong> ${cell.nearest_station_id?.substring(0, 8) || '未知'}<br/>
+        <strong>響應時間:</strong> ${Math.round(serviceTime / 60)}分鐘 (${serviceTime.toFixed(1)}秒)<br/>
+        <strong>服務等級描述:</strong> ${serviceLevel}<br/>
+      `;
+    }
+    
+    if (cell.nearest_ambulance_station_id) {
+      content += `
+        <strong>最近站點:</strong> ${cell.nearest_ambulance_station_id}<br/>
       `;
     }
 
@@ -2135,7 +2157,7 @@ class MapService {
     content += `
         <hr style="margin: 8px 0;">
         <small style="color: #666;">
-          網格大小: ${cell.grid_size || 50}m × ${cell.grid_size || 50}m
+          網格大小: ${cell.grid_size_meters || 50}m × ${cell.grid_size_meters || 50}m
         </small>
       </div>
     `;
@@ -2145,15 +2167,18 @@ class MapService {
 
   /**
    * Get service level text based on response time
-   * @param {number} responseTimeSeconds - Response time in seconds
+   * @param {number} serviceTimeSeconds - Service time in seconds
    * @returns {string} - Service level text
    */
-  _getServiceLevelText(responseTimeSeconds) {
-    if (responseTimeSeconds <= 300) {
+  _getServiceLevelText(serviceTimeSeconds) {
+    if (serviceTimeSeconds === null || serviceTimeSeconds === undefined) {
+      return '⚫ 無法到達';
+    }
+    if (serviceTimeSeconds <= 300) {
       return '🟢 優秀 (≤5分鐘)';
-    } else if (responseTimeSeconds <= 600) {
+    } else if (serviceTimeSeconds <= 600) {
       return '🟡 良好 (5-10分鐘)';
-    } else if (responseTimeSeconds <= 900) {
+    } else if (serviceTimeSeconds <= 900) {
       return '🟠 一般 (10-15分鐘)';
     } else {
       return '🔴 較差 (>15分鐘)';
