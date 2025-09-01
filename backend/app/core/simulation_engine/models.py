@@ -60,6 +60,16 @@ class RoadObstruction(BaseModel):
     remaining_width: float = Field(ge=0.0, description="Remaining passable width in meters")
     blocked_percentage: float = Field(ge=0.0, le=100.0, description="Percentage of road blocked")
     caused_by_event: str = Field(description="ID of the disaster event that caused this obstruction")
+    
+    # Directional blockage information
+    directional_blockage: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Remaining width by direction: {'forward': float, 'backward': float}"
+    )
+    affected_directions: List[str] = Field(
+        default=[],
+        description="List of traffic directions affected by this obstruction"
+    )
 
 
 class PathfindingRequest(BaseModel):

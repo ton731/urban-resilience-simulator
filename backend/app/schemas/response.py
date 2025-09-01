@@ -315,6 +315,8 @@ class PathfindingResponse(BaseModel):
     success: bool = Field(description="Whether a valid path was found")
     path_coordinates: List[Tuple[float, float]] = Field(description="List of coordinates forming the path")
     path_node_ids: List[str] = Field(description="List of node IDs in the path")
+    is_partial_path: bool = Field(default=False, description="True if this is a partial path (destination not reachable)")
+    partial_path_reason: Optional[str] = Field(default=None, description="Reason why only partial path was found")
     
     # Path metrics
     total_distance: float = Field(description="Total path distance in meters")

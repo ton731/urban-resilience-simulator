@@ -230,6 +230,26 @@ const RoutePlanningPanel = () => {
             </div>
           )}
 
+          {/* Partial Path Warning */}
+          {(routePlanning.postDisasterRoute?.is_partial_path || 
+            (!hasDisasterData && routePlanning.preDisasterRoute?.is_partial_path)) && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <div className="flex items-start">
+                <span className="text-amber-600 text-lg mr-2">⚠️</span>
+                <div>
+                  <p className="text-amber-800 text-sm font-medium">部分路徑</p>
+                  <p className="text-amber-700 text-xs mt-1">
+                    {routePlanning.postDisasterRoute?.partial_path_reason || 
+                     routePlanning.preDisasterRoute?.partial_path_reason}
+                  </p>
+                  <p className="text-amber-600 text-xs mt-2">
+                    🚧 路徑僅顯示可到達的部分，紅色終點為實際可達位置
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Layer Visibility Controls */}
           {(routePlanning.preDisasterRoute || routePlanning.postDisasterRoute) && (
             <div className="space-y-3">

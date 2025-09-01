@@ -23,17 +23,40 @@ class MapNode:
 
 
 @dataclass
+class LaneInfo:
+    """Represents individual lane information within a road"""
+    
+    lane_id: int  # 0, 1, 2, etc.
+    direction: str  # "forward", "backward" for bidirectional roads
+    side: str  # "left", "right" for Taiwan right-hand traffic
+    width: float  # individual lane width in meters
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "lane_id": self.lane_id,
+            "direction": self.direction,
+            "side": self.side,
+            "width": self.width,
+        }
+
+
+@dataclass
 class RoadEdge:
     """Represents a road segment between two nodes"""
 
     id: str
     from_node: str
     to_node: str
-    width: float  # in meters
-    lanes: int
+    width: float  # total road width in meters
+    lanes: int  # total number of lanes
     is_bidirectional: bool = True
     road_type: str = "secondary"  # "main", "secondary"
     speed_limit: float = 50.0  # km/h
+    
+    # New directional information
+    primary_direction: str = "north"  # "north", "south", "east", "west" for single direction roads
+    lane_info: List[LaneInfo] = field(default_factory=list)  # detailed lane information
+    has_center_divider: bool = True  # whether bidirectional roads have a center line
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -45,7 +68,20 @@ class RoadEdge:
             "is_bidirectional": self.is_bidirectional,
             "road_type": self.road_type,
             "speed_limit": self.speed_limit,
+            "primary_direction": self.primary_direction,
+            "lane_info": [lane.to_dict() for lane in self.lane_info],
+            "has_center_divider": self.has_center_divider,
         }
+    
+    def get_lanes_by_direction(self, direction: str) -> List[LaneInfo]:
+        """Get all lanes going in a specific direction"""
+        return [lane for lane in self.lane_info if lane.direction == direction]
+    
+    def get_remaining_width_by_direction(self, direction: str, blocked_width: float) -> float:
+        """Calculate remaining width for a specific direction after blockage"""
+        direction_lanes = self.get_lanes_by_direction(direction)
+        total_direction_width = sum(lane.width for lane in direction_lanes)
+        return max(0.0, total_direction_width - blocked_width)
 
 
 @dataclass
@@ -140,6 +176,76 @@ class MapGenerator:
         self.ambulance_stations = config.get("ambulance_stations", 3)
         self.shelters = config.get("shelters", 8)
 
+    def _create_lane_info(self, 
+                         total_lanes: int, 
+                         is_bidirectional: bool, 
+                         total_width: float,
+                         road_direction: str = "north") -> List[LaneInfo]:
+        """
+        Create detailed lane information for a road segment.
+        
+        Args:
+            total_lanes: Total number of lanes
+            is_bidirectional: Whether the road is bidirectional
+            total_width: Total road width in meters
+            road_direction: Primary direction for unidirectional roads
+            
+        Returns:
+            List of LaneInfo objects with detailed lane configuration
+        """
+        lane_info = []
+        
+        if is_bidirectional:
+            # For bidirectional roads, split lanes evenly
+            lanes_per_direction = total_lanes // 2
+            lane_width = total_width / total_lanes
+            
+            # Create forward direction lanes (right side in Taiwan)
+            for i in range(lanes_per_direction):
+                lane_info.append(LaneInfo(
+                    lane_id=i,
+                    direction="forward",
+                    side="right",
+                    width=lane_width
+                ))
+            
+            # Create backward direction lanes (left side in Taiwan)  
+            for i in range(lanes_per_direction):
+                lane_info.append(LaneInfo(
+                    lane_id=i + lanes_per_direction,
+                    direction="backward", 
+                    side="left",
+                    width=lane_width
+                ))
+        else:
+            # For unidirectional roads, all lanes go in the same direction
+            lane_width = total_width / total_lanes
+            side = "right"  # Default to right side
+            
+            for i in range(total_lanes):
+                lane_info.append(LaneInfo(
+                    lane_id=i,
+                    direction="forward",
+                    side=side,
+                    width=lane_width
+                ))
+                
+        return lane_info
+    
+    def _determine_road_direction(self, from_x: float, from_y: float, to_x: float, to_y: float) -> str:
+        """
+        Determine the primary direction of a road based on from/to coordinates.
+        
+        Returns: "north", "south", "east", "west"
+        """
+        dx = to_x - from_x
+        dy = to_y - from_y
+        
+        if abs(dx) > abs(dy):
+            return "east" if dx > 0 else "west"
+        else:
+            return "north" if dy > 0 else "south"
+
     def generate_map(
         self,
         include_trees: bool = True,
@@ -225,7 +331,15 @@ class MapGenerator:
             map_data.nodes[top_node_id] = top_node
             map_data.nodes[bottom_node_id] = bottom_node
 
-            # Create road edge
+            # Determine road direction and create lane info
+            road_direction = self._determine_road_direction(
+                bottom_node.x, bottom_node.y, top_node.x, top_node.y
+            )
+            lane_info = self._create_lane_info(
+                self.main_road_lanes, True, self.main_road_width, road_direction
+            )
+            
+            # Create road edge with directional information
             edge_id = str(uuid.uuid4())
             road_edge = RoadEdge(
                 id=edge_id,
@@ -233,8 +347,12 @@ class MapGenerator:
                 to_node=top_node_id,
                 width=self.main_road_width,
                 lanes=self.main_road_lanes,
+                is_bidirectional=True,
                 road_type="main",
                 speed_limit=70.0,
+                primary_direction=road_direction,
+                lane_info=lane_info,
+                has_center_divider=True,
             )
 
             map_data.edges[edge_id] = road_edge
@@ -260,7 +378,15 @@ class MapGenerator:
             map_data.nodes[left_node_id] = left_node
             map_data.nodes[right_node_id] = right_node
 
-            # Create road edge
+            # Determine road direction and create lane info
+            road_direction = self._determine_road_direction(
+                left_node.x, left_node.y, right_node.x, right_node.y
+            )
+            lane_info = self._create_lane_info(
+                self.main_road_lanes, True, self.main_road_width, road_direction
+            )
+            
+            # Create road edge with directional information
             edge_id = str(uuid.uuid4())
             road_edge = RoadEdge(
                 id=edge_id,
@@ -268,8 +394,12 @@ class MapGenerator:
                 to_node=right_node_id,
                 width=self.main_road_width,
                 lanes=self.main_road_lanes,
+                is_bidirectional=True,
                 road_type="main",
                 speed_limit=70.0,
+                primary_direction=road_direction,
+                lane_info=lane_info,
+                has_center_divider=True,
             )
 
             map_data.edges[edge_id] = road_edge
@@ -476,7 +606,13 @@ class MapGenerator:
         map_data.nodes[start_node_id] = start_node
         map_data.nodes[end_node_id] = end_node
         
-        # Create the road edge
+        # Determine road direction and create lane info for horizontal alley
+        road_direction = self._determine_road_direction(start_x, start_y, end_x, end_y)
+        lane_info = self._create_lane_info(
+            self.secondary_road_lanes, is_bidirectional, self.secondary_road_width, road_direction
+        )
+        
+        # Create the road edge with directional information
         edge_id = str(uuid.uuid4())
         road_edge = RoadEdge(
             id=edge_id,
@@ -487,6 +623,9 @@ class MapGenerator:
             is_bidirectional=is_bidirectional,
             road_type="secondary",
             speed_limit=30.0,
+            primary_direction=road_direction,
+            lane_info=lane_info,
+            has_center_divider=is_bidirectional,  # Only bidirectional roads have center dividers
         )
         
         map_data.edges[edge_id] = road_edge
@@ -550,7 +689,13 @@ class MapGenerator:
         map_data.nodes[start_node_id] = start_node
         map_data.nodes[end_node_id] = end_node
         
-        # Create the road edge
+        # Determine road direction and create lane info for vertical alley
+        road_direction = self._determine_road_direction(start_x, start_y, end_x, end_y)
+        lane_info = self._create_lane_info(
+            self.secondary_road_lanes, is_bidirectional, self.secondary_road_width, road_direction
+        )
+        
+        # Create the road edge with directional information
         edge_id = str(uuid.uuid4())
         road_edge = RoadEdge(
             id=edge_id,
@@ -561,6 +706,9 @@ class MapGenerator:
             is_bidirectional=is_bidirectional,
             road_type="secondary",
             speed_limit=30.0,
+            primary_direction=road_direction,
+            lane_info=lane_info,
+            has_center_divider=is_bidirectional,  # Only bidirectional roads have center dividers
         )
         
         map_data.edges[edge_id] = road_edge

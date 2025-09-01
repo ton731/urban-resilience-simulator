@@ -248,18 +248,62 @@ class MapService {
 
       const road = L.polygon(roadPolygon, roadOptions);
       
-      // Add direction arrow for one-way roads
-      if (!edge.is_bidirectional) {
-        const arrowLatLng = this._getArrowPosition(fromNode, toNode);
-        const arrow = this._createDirectionArrow(arrowLatLng, this._calculateAngle(fromNode, toNode), isMainRoad);
+      // Add lane dividers and direction indicators for ALL roads
+      
+      // 1. Add center divider line for bidirectional roads
+      if (edge.is_bidirectional) {
+        const centerLine = this._createCenterDivider(fromNode, toNode);
         
-        // Add arrow to the same layer
+        // Add to appropriate layer
+        if (isMainRoad) {
+          this.layers.mainRoads.addLayer(centerLine);
+        } else {
+          this.layers.secondaryRoads.addLayer(centerLine);
+        }
+        this.layers.edges.addLayer(centerLine);
+      }
+      
+      // 2. Add road surface arrows for ALL roads
+      const primaryDirection = edge.primary_direction || this._determineDirection(fromNode, toNode);
+      
+      const roadArrows = this._createRoadSurfaceArrows(
+        fromNode, 
+        toNode, 
+        edge, 
+        primaryDirection
+      );
+      
+      // Add arrows to the same layer
+      roadArrows.forEach(arrow => {
         if (isMainRoad) {
           this.layers.mainRoads.addLayer(arrow);
         } else {
           this.layers.secondaryRoads.addLayer(arrow);
         }
         this.layers.edges.addLayer(arrow);
+      });
+      
+      // Enhanced popup with lane information
+      let laneInfoHtml = '';
+      if (edge.lane_info && edge.lane_info.length > 0) {
+        const forwardLanes = edge.lane_info.filter(lane => lane.direction === 'forward');
+        const backwardLanes = edge.lane_info.filter(lane => lane.direction === 'backward');
+        
+        laneInfoHtml = `
+          <hr style="margin: 8px 0;">
+          <strong>車道配置 Lane Configuration:</strong><br/>
+        `;
+        
+        if (forwardLanes.length > 0) {
+          laneInfoHtml += `<small>🚗 前進方向: ${forwardLanes.length}車道 (${forwardLanes[0].width.toFixed(1)}m/車道)</small><br/>`;
+        }
+        if (backwardLanes.length > 0) {
+          laneInfoHtml += `<small>🚙 後退方向: ${backwardLanes.length}車道 (${backwardLanes[0].width.toFixed(1)}m/車道)</small><br/>`;
+        }
+        
+        if (edge.has_center_divider) {
+          laneInfoHtml += `<small>🛤️ 中央分隔線: 是</small><br/>`;
+        }
       }
       
       road.bindPopup(`
@@ -270,10 +314,14 @@ class MapService {
           <strong>寬度 Width:</strong> ${edge.width}m<br/>
           <strong>車道 Lanes:</strong> ${edge.lanes}<br/>
           <strong>速限 Speed Limit:</strong> ${edge.speed_limit} km/h<br/>
-          <strong>方向 Direction:</strong> ${edge.is_bidirectional ? '雙向 Bidirectional' : '單向 One-way'}<br/>
+          <strong>方向 Direction:</strong> ${edge.is_bidirectional ? '雙向 Bidirectional' : `單向 One-way (${edge.primary_direction || 'Unknown'})`}<br/>
+          ${laneInfoHtml}
           <hr style="margin: 8px 0;">
           <small style="color: #666;">
-            ${edge.is_bidirectional ? '⟷ 雙向通行' : '→ 單向通行'}
+            ${edge.is_bidirectional ? 
+              (edge.has_center_divider ? '⟷ 雙向通行 (有分隔線)' : '⟷ 雙向通行') : 
+              `→ 單向通行 (${edge.primary_direction || '方向未知'})`
+            }
           </small>
         </div>
       `);
@@ -323,33 +371,182 @@ class MapService {
   }
 
   /**
-   * Create direction arrow for one-way roads
-   * @param {Array} position - [lat, lng] position for arrow
-   * @param {number} angle - Angle in degrees for arrow direction
-   * @param {boolean} isMainRoad - Whether this is a main road
-   * @returns {Object} - Leaflet marker with arrow
+   * Create center divider line for bidirectional roads
+   * @param {Object} fromNode - Starting node with lat/lng
+   * @param {Object} toNode - Ending node with lat/lng
+   * @returns {Object} - Leaflet polyline representing center divider
    */
-  _createDirectionArrow(position, angle, isMainRoad) {
-    const arrowSize = isMainRoad ? 12 : 8;
-    const arrowColor = isMainRoad ? '#666666' : '#666666'; // Both main and secondary roads use same gray
+  _createCenterDivider(fromNode, toNode) {
+    const centerLine = L.polyline(
+      [[fromNode.lat, fromNode.lng], [toNode.lat, toNode.lng]], 
+      {
+        color: '#FFD700',     // Golden yellow center line for better visibility  
+        weight: 3,            // Thicker line
+        opacity: 1.0,         // Full opacity
+        dashArray: '8, 6',    // Dashed line pattern (shorter dashes)
+      }
+    );
     
-    const arrowIcon = L.divIcon({
-      html: `
-        <div style="
-          width: ${arrowSize}px; 
-          height: ${arrowSize}px; 
-          background-color: ${arrowColor}; 
-          transform: rotate(${angle}deg);
-          clip-path: polygon(0 0, 100% 50%, 0 100%);
-          border: 1px solid white;
-        "></div>
-      `,
-      className: 'direction-arrow',
-      iconSize: [arrowSize, arrowSize],
-      iconAnchor: [arrowSize/2, arrowSize/2]
+    centerLine.bindTooltip('中央分隔線', { 
+      permanent: false, 
+      direction: 'center' 
     });
+    
+    return centerLine;
+  }
 
-    return L.marker(position, { icon: arrowIcon });
+  /**
+   * Determine road direction based on coordinates
+   * @param {Object} fromNode - Starting node with lat/lng
+   * @param {Object} toNode - Ending node with lat/lng
+   * @returns {string} - Direction: north/south/east/west
+   */
+  _determineDirection(fromNode, toNode) {
+    const dx = toNode.lng - fromNode.lng;
+    const dy = toNode.lat - fromNode.lat;
+    
+    if (Math.abs(dx) > Math.abs(dy)) {
+      return dx > 0 ? 'east' : 'west';
+    } else {
+      return dy > 0 ? 'north' : 'south';
+    }
+  }
+
+  /**
+   * Create road surface arrows painted directly on the road
+   * @param {Object} fromNode - Starting node with lat/lng
+   * @param {Object} toNode - Ending node with lat/lng
+   * @param {Object} edge - Road edge data
+   * @param {string} primaryDirection - Primary direction (north/south/east/west)
+   * @returns {Array} - Array of Leaflet polygons representing arrows
+   */
+  _createRoadSurfaceArrows(fromNode, toNode, edge, primaryDirection) {
+    const arrows = [];
+    const isMainRoad = edge.road_type === 'main';
+    const roadWidth = edge.width || (isMainRoad ? 12 : 6);
+    
+    // Calculate road direction and length
+    const dx = toNode.lng - fromNode.lng;
+    const dy = toNode.lat - fromNode.lat;
+    const roadLength = Math.sqrt(dx * dx + dy * dy);
+    
+    // Unit direction vector
+    const unitX = dx / roadLength;
+    const unitY = dy / roadLength;
+    
+    // Perpendicular vector for road width
+    const perpX = -unitY;
+    const perpY = unitX;
+    
+    if (edge.is_bidirectional) {
+      // For bidirectional roads, create arrows on both sides
+      arrows.push(...this._createBidirectionalArrows(
+        fromNode, toNode, unitX, unitY, perpX, perpY, roadWidth, isMainRoad
+      ));
+    } else {
+      // For unidirectional roads, create arrows in the center
+      arrows.push(...this._createUnidirectionalArrows(
+        fromNode, toNode, unitX, unitY, perpX, perpY, roadWidth, isMainRoad, primaryDirection
+      ));
+    }
+    
+    return arrows;
+  }
+
+  /**
+   * Create arrows for bidirectional roads (left and right sides)
+   */
+  _createBidirectionalArrows(fromNode, toNode, unitX, unitY, perpX, perpY, roadWidth, isMainRoad) {
+    const arrows = [];
+    const arrowSpacing = isMainRoad ? 0.0003 : 0.0004; // Spacing between arrows in degrees
+    const sideOffset = roadWidth * 0.25 / 111000; // Quarter road width offset
+    
+    // Calculate number of arrows based on road length
+    const dx = toNode.lng - fromNode.lng;
+    const dy = toNode.lat - fromNode.lat;
+    const roadLength = Math.sqrt(dx * dx + dy * dy);
+    const numArrows = Math.max(1, Math.floor(roadLength / arrowSpacing));
+    
+    for (let i = 0; i < numArrows; i++) {
+      const progress = (i + 0.5) / numArrows; // Center arrows along road
+      const centerLat = fromNode.lat + dy * progress;
+      const centerLng = fromNode.lng + dx * progress;
+      
+      // Right side arrow (forward direction)
+      const rightArrowLat = centerLat - perpY * sideOffset;
+      const rightArrowLng = centerLng - perpX * sideOffset;
+      arrows.push(this._createSingleArrow(rightArrowLat, rightArrowLng, unitX, unitY, isMainRoad, true));
+      
+      // Left side arrow (backward direction) 
+      const leftArrowLat = centerLat + perpY * sideOffset;
+      const leftArrowLng = centerLng + perpX * sideOffset;
+      arrows.push(this._createSingleArrow(leftArrowLat, leftArrowLng, -unitX, -unitY, isMainRoad, true));
+    }
+    
+    return arrows;
+  }
+
+  /**
+   * Create arrows for unidirectional roads (center)
+   */
+  _createUnidirectionalArrows(fromNode, toNode, unitX, unitY, perpX, perpY, roadWidth, isMainRoad, primaryDirection) {
+    const arrows = [];
+    const arrowSpacing = isMainRoad ? 0.0004 : 0.0005; // Spacing between arrows
+    
+    // Calculate number of arrows based on road length
+    const dx = toNode.lng - fromNode.lng;
+    const dy = toNode.lat - fromNode.lat;
+    const roadLength = Math.sqrt(dx * dx + dy * dy);
+    const numArrows = Math.max(1, Math.floor(roadLength / arrowSpacing));
+    
+    for (let i = 0; i < numArrows; i++) {
+      const progress = (i + 0.5) / numArrows; // Center arrows along road
+      const arrowLat = fromNode.lat + dy * progress;
+      const arrowLng = fromNode.lng + dx * progress;
+      
+      arrows.push(this._createSingleArrow(arrowLat, arrowLng, unitX, unitY, isMainRoad, false));
+    }
+    
+    return arrows;
+  }
+
+  /**
+   * Create a single arrow polygon on the road surface
+   */
+  _createSingleArrow(lat, lng, dirX, dirY, isMainRoad, isBidirectional) {
+    const arrowSize = isMainRoad ? 0.00008 : 0.00006; // Arrow size in degrees
+    const arrowLength = arrowSize * 1.5;
+    
+    // Arrow head point
+    const headLat = lat + dirY * arrowLength;
+    const headLng = lng + dirX * arrowLength;
+    
+    // Arrow tail points (left and right)
+    const perpX = -dirY;
+    const perpY = dirX;
+    
+    const tailLeftLat = lat - perpY * arrowSize * 0.5;
+    const tailLeftLng = lng - perpX * arrowSize * 0.5;
+    
+    const tailRightLat = lat + perpY * arrowSize * 0.5;
+    const tailRightLng = lng + perpX * arrowSize * 0.5;
+    
+    // Create arrow polygon
+    const arrowPolygon = L.polygon([
+      [headLat, headLng],      // Arrow tip
+      [tailLeftLat, tailLeftLng],   // Left tail
+      [lat, lng],              // Center (back of arrow)
+      [tailRightLat, tailRightLng], // Right tail
+      [headLat, headLng]       // Close polygon
+    ], {
+      color: '#ffffff',        // White outline
+      fillColor: isBidirectional ? '#4CAF50' : '#FF9800', // Green for bidirectional, Orange for unidirectional
+      weight: 1,
+      fillOpacity: 0.8,
+      opacity: 0.9
+    });
+    
+    return arrowPolygon;
   }
 
   /**
@@ -1197,13 +1394,34 @@ class MapService {
       });
 
       // Add popup with obstruction information
+      // Enhanced popup with directional blockage information
+      let directionalInfo = '';
+      if (obstruction.directional_blockage) {
+        directionalInfo = `
+          <hr style="margin: 8px 0;">
+          <strong>分向阻塞情況:</strong><br/>
+          <small>🚗 前進方向: ${obstruction.directional_blockage.forward ? obstruction.directional_blockage.forward.toFixed(1) : 'N/A'}m 剩餘</small><br/>
+          <small>🚙 後退方向: ${obstruction.directional_blockage.backward ? obstruction.directional_blockage.backward.toFixed(1) : 'N/A'}m 剩餘</small><br/>
+        `;
+        
+        if (obstruction.affected_directions && obstruction.affected_directions.length > 0) {
+          directionalInfo += `<small style="color: #d32f2f;">⚠️ 受阻方向: ${obstruction.affected_directions.join(', ')}</small><br/>`;
+        }
+      }
+      
       const popupContent = `
-        <div class="text-sm">
-          <strong>🚧 道路阻塞</strong><br/>
-          <strong>道路ID:</strong> ${obstruction.road_edge_id}<br/>
+        <div class="text-sm" style="font-family: monospace;">
+          <strong>🚧 道路阻塞 Road Obstruction</strong><br/>
+          <hr style="margin: 8px 0;">
+          <strong>道路ID:</strong> ${obstruction.road_edge_id.substring(0, 8)}<br/>
           <strong>剩餘寬度:</strong> ${obstruction.remaining_width.toFixed(1)}m<br/>
           <strong>阻塞率:</strong> ${obstruction.blocked_percentage.toFixed(1)}%<br/>
-          <strong>造成事件:</strong> ${obstruction.caused_by_event}
+          <strong>造成事件:</strong> ${obstruction.caused_by_event.substring(0, 8)}<br/>
+          ${directionalInfo}
+          <hr style="margin: 8px 0;">
+          <small style="color: #666;">
+            ${obstruction.remaining_width < 2.0 ? '❌ 完全阻塞' : '⚠️ 部分阻塞'}
+          </small>
         </div>
       `;
 
@@ -1470,6 +1688,12 @@ class MapService {
       <div style="font-family: monospace; min-width: 200px;">
         <strong>🛣️ ${style.name}</strong><br/>
         <hr style="margin: 8px 0;">
+        ${route.is_partial_path ? 
+          `<div style="background-color: #fef3c7; padding: 4px; border-radius: 4px; margin-bottom: 8px;">
+            <strong style="color: #92400e;">⚠️ 部分路徑</strong><br/>
+            <small style="color: #92400e;">${route.partial_path_reason || '無法到達完整目的地'}</small>
+          </div>` : ''
+        }
         <strong>總距離:</strong> ${route.total_distance.toFixed(1)}m<br/>
         <strong>預計時間:</strong> ${route.estimated_travel_time.toFixed(1)}秒<br/>
         <strong>車輛類型:</strong> ${route.vehicle_type}<br/>
@@ -1481,6 +1705,7 @@ class MapService {
           ${routeType === 'preDisaster' ? '💚 不考慮災害影響的路徑' :
             routeType === 'postDisaster' ? '🔴 考慮災害影響的路徑' :
             '🔮 替代路徑選項'}
+          ${route.is_partial_path ? '<br/>🚧 此路線因阻塞而無法到達原始終點' : ''}
         </small>
       </div>
     `;

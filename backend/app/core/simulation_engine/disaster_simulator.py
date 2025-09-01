@@ -8,7 +8,7 @@ import random
 import uuid
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, Point, LineString
 from shapely.ops import transform
 import numpy as np
 
@@ -190,6 +190,12 @@ class DisasterSimulator:
         Returns:
             List of (x, y) coordinate tuples forming the blockage polygon
         """
+        print(f"🌳 计算树木阻塞多边形:")
+        print(f"  树位置: ({tree_x:.1f}, {tree_y:.1f})")
+        print(f"  树高: {tree_height:.1f}m")
+        print(f"  树干宽度: {trunk_width:.1f}m")
+        print(f"  倒塌角度: {collapse_angle:.1f}°")
+        
         # Convert angle to radians
         angle_rad = math.radians(collapse_angle)
         
@@ -197,10 +203,14 @@ class DisasterSimulator:
         end_x = tree_x + tree_height * math.cos(angle_rad)
         end_y = tree_y + tree_height * math.sin(angle_rad)
         
+        print(f"  倒塌终点: ({end_x:.1f}, {end_y:.1f})")
+        
         # Calculate perpendicular offset for tree width
         perpendicular_angle = angle_rad + math.pi / 2
         width_offset_x = (trunk_width / 2) * math.cos(perpendicular_angle)
         width_offset_y = (trunk_width / 2) * math.sin(perpendicular_angle)
+        
+        print(f"  宽度偏移: (±{width_offset_x:.1f}, ±{width_offset_y:.1f})")
         
         # Create rectangle polygon representing fallen tree
         # Four corners of the fallen tree rectangle
@@ -210,6 +220,15 @@ class DisasterSimulator:
             (end_x - width_offset_x, end_y - width_offset_y),    # Crown right
             (end_x + width_offset_x, end_y + width_offset_y),    # Crown left
         ]
+        
+        print(f"  阻塞多边形四角:")
+        for i, point in enumerate(polygon_points):
+            print(f"    {i+1}: ({point[0]:.1f}, {point[1]:.1f})")
+        
+        # Calculate and print polygon area for verification
+        from shapely.geometry import Polygon
+        temp_polygon = Polygon(polygon_points)
+        print(f"  阻塞面积: {temp_polygon.area:.2f}m²")
         
         return polygon_points
     
@@ -313,22 +332,37 @@ class DisasterSimulator:
             
             blocked_percentage = min(100.0, (intersection_area / road_area) * 100)
             
-            # Calculate remaining width more precisely
-            # This is a simplified calculation - in practice would use cross-sectional analysis
-            remaining_width = self._calculate_remaining_road_width(
-                road_polygon, intersection, road_width
+            # Calculate directional blockage for bidirectional roads
+            directional_blockage = self._calculate_directional_blockage(
+                road_polygon, intersection, road_data, road_width
             )
+            
+            # Overall remaining width is the minimum of both directions
+            overall_remaining_width = min(directional_blockage.values())
+            
+            # Determine which directions are affected (below minimum width threshold)
+            min_width_threshold = 2.0  # Minimum width for any vehicle
+            affected_directions = [
+                direction for direction, width in directional_blockage.items() 
+                if width < min_width_threshold
+            ]
             
             # Get intersection polygon coordinates
             obstruction_coords = self._extract_polygon_coordinates(intersection)
+            
+            print(f"  🚧 创建道路阻塞对象:")
+            print(f"    整体剩余宽度: {overall_remaining_width:.2f}m")
+            print(f"    受影响方向: {affected_directions}")
             
             return RoadObstruction(
                 obstruction_id=f"obstruction_{uuid.uuid4().hex[:8]}",
                 road_edge_id=road_id,
                 obstruction_polygon=obstruction_coords,
-                remaining_width=max(0.0, remaining_width),
+                remaining_width=max(0.0, overall_remaining_width),
                 blocked_percentage=blocked_percentage,
-                caused_by_event=collapse_event.event_id
+                caused_by_event=collapse_event.event_id,
+                directional_blockage=directional_blockage,
+                affected_directions=affected_directions
             )
         
         return None
@@ -390,7 +424,8 @@ class DisasterSimulator:
         """
         Calculate remaining passable road width after obstruction.
         
-        Implements SE-2.2 requirement for remaining passable width calculation.
+        Key insight: Blockage is a CROSS-SECTIONAL concept, not area-based.
+        We need to find the narrowest passable width at the intersection point.
         
         Args:
             road_polygon: Full road polygon
@@ -398,26 +433,360 @@ class DisasterSimulator:
             original_width: Original road width
             
         Returns:
-            Remaining passable width in meters
+            Remaining passable width in meters at the narrowest point
+        """
+        print(f"🔍 计算横截面剩余道路宽度:")
+        print(f"  原始道路宽度: {original_width:.1f}m")
+        
+        try:
+            # Get road centerline and direction
+            road_bounds = road_polygon.bounds  # (minx, miny, maxx, maxy)
+            road_length = max(road_bounds[2] - road_bounds[0], road_bounds[3] - road_bounds[1])
+            
+            print(f"  道路范围: ({road_bounds[0]:.1f}, {road_bounds[1]:.1f}) 到 ({road_bounds[2]:.1f}, {road_bounds[3]:.1f})")
+            
+            # Calculate cross-sectional blockage at the intersection
+            min_remaining_width = self._calculate_cross_sectional_width(
+                road_polygon, intersection, original_width
+            )
+            
+            print(f"  横截面最小剩余宽度: {min_remaining_width:.2f}m")
+            
+            return max(0.0, min_remaining_width)
+            
+        except Exception as e:
+            print(f"  ❌ 横截面计算错误: {e}")
+            # Emergency fallback: if there's any intersection, assume significant blockage
+            print(f"  紧急回退: 假设严重阻塞，剩余宽度为原始宽度的20%")
+            return original_width * 0.2
+    
+    def _calculate_cross_sectional_width(
+        self, 
+        road_polygon: Polygon, 
+        intersection: Polygon, 
+        original_width: float
+    ) -> float:
+        """
+        Calculate the minimum cross-sectional remaining width.
+        
+        This method samples multiple cross-sections through the intersection
+        to find the narrowest passable point.
+        """
+        
+        # Get road geometry
+        road_bounds = road_polygon.bounds
+        intersection_bounds = intersection.bounds
+        
+        # Determine road direction (longer dimension)
+        road_dx = road_bounds[2] - road_bounds[0]  # width in x direction
+        road_dy = road_bounds[3] - road_bounds[1]  # width in y direction
+        
+        if road_dx > road_dy:
+            # Road runs primarily in X direction
+            is_horizontal = True
+            road_start = road_bounds[0]
+            road_end = road_bounds[2]
+            road_width_dim = road_dy
+        else:
+            # Road runs primarily in Y direction  
+            is_horizontal = False
+            road_start = road_bounds[1]
+            road_end = road_bounds[3]
+            road_width_dim = road_dx
+        
+        print(f"  道路方向: {'水平' if is_horizontal else '垂直'}")
+        print(f"  道路长度: {abs(road_end - road_start):.1f}m")
+        print(f"  道路宽度维度: {road_width_dim:.1f}m")
+        
+        # Sample cross-sections through the intersection area
+        intersection_start = intersection_bounds[0 if is_horizontal else 1]
+        intersection_end = intersection_bounds[2 if is_horizontal else 3]
+        
+        # Create multiple cross-sectional lines through the intersection
+        num_samples = 10
+        min_remaining_width = original_width  # Start with full width
+        
+        for i in range(num_samples):
+            # Position along the road where we check the cross-section
+            if intersection_start == intersection_end:
+                position = intersection_start
+            else:
+                position = intersection_start + (intersection_end - intersection_start) * i / (num_samples - 1)
+            
+            # Create cross-sectional line perpendicular to road direction
+            if is_horizontal:
+                # Road is horizontal, so cross-section is vertical
+                cross_line = LineString([
+                    (position, road_bounds[1] - 1),  # Extend beyond road
+                    (position, road_bounds[3] + 1)
+                ])
+            else:
+                # Road is vertical, so cross-section is horizontal  
+                cross_line = LineString([
+                    (road_bounds[0] - 1, position),  # Extend beyond road
+                    (road_bounds[2] + 1, position)
+                ])
+            
+            # Calculate remaining width at this cross-section
+            remaining_width = self._calculate_width_at_cross_section(
+                cross_line, road_polygon, intersection, original_width
+            )
+            
+            min_remaining_width = min(min_remaining_width, remaining_width)
+            
+            print(f"    采样点 {i+1}: 位置 {position:.1f}, 剩余宽度 {remaining_width:.2f}m")
+        
+        print(f"  所有采样点中最小剩余宽度: {min_remaining_width:.2f}m")
+        return min_remaining_width
+    
+    def _calculate_width_at_cross_section(
+        self, 
+        cross_line: LineString, 
+        road_polygon: Polygon, 
+        intersection: Polygon, 
+        original_width: float
+    ) -> float:
+        """
+        Calculate remaining width at a specific cross-section line.
         """
         try:
-            # Calculate remaining area after subtracting intersection
-            remaining_area = road_polygon.area - intersection.area
-            road_length = self._estimate_road_length_from_polygon(road_polygon)
+            # Get intersection of cross-line with road polygon
+            road_intersection = cross_line.intersection(road_polygon)
+            if road_intersection.is_empty:
+                return original_width  # No intersection means full width available
             
-            if road_length > 0:
-                # Estimate remaining width as remaining_area / road_length
-                remaining_width = remaining_area / road_length
-                return min(remaining_width, original_width)
+            # Get intersection of cross-line with obstruction
+            obstruction_intersection = cross_line.intersection(intersection)
+            if obstruction_intersection.is_empty:
+                return original_width  # No obstruction at this cross-section
+            
+            # Calculate blocked length along this cross-section
+            if hasattr(obstruction_intersection, 'length'):
+                blocked_length = obstruction_intersection.length
+            elif hasattr(obstruction_intersection, 'coords'):
+                # Point intersection
+                blocked_length = 0.0
             else:
-                # Fallback calculation
-                blocked_percentage = (intersection.area / road_polygon.area) * 100
-                return original_width * (1.0 - blocked_percentage / 100.0)
+                blocked_length = 0.0
+            
+            # Calculate total road width at this cross-section
+            if hasattr(road_intersection, 'length'):
+                total_road_width = road_intersection.length
+            else:
+                total_road_width = original_width
+            
+            # Remaining width is total width minus blocked width
+            remaining_width = total_road_width - blocked_length
+            
+            return max(0.0, remaining_width)
+            
+        except Exception as e:
+            print(f"      横截面宽度计算错误: {e}")
+            return original_width * 0.5  # Conservative fallback
+    
+    def _calculate_directional_blockage(
+        self,
+        road_polygon: Polygon,
+        intersection: Polygon,
+        road_data: Dict[str, Any],
+        original_width: float
+    ) -> Dict[str, float]:
+        """
+        Calculate remaining width for each direction separately for bidirectional roads.
+        
+        For Taiwan's right-hand traffic:
+        - Forward direction uses right side of road
+        - Backward direction uses left side of road
+        
+        Returns:
+            Dict with 'forward' and 'backward' remaining widths
+        """
+        print(f"🔍 计算分向道阻塞:")
+        
+        # Get road lane information if available
+        lane_info = road_data.get('lane_info', [])
+        is_bidirectional = road_data.get('is_bidirectional', True)
+        
+        if not is_bidirectional or not lane_info:
+            # For unidirectional roads, use simple calculation
+            remaining_width = self._calculate_cross_sectional_width(
+                road_polygon, intersection, original_width
+            )
+            direction = "forward"  # Default direction
+            print(f"  单向道路: {direction} 方向剩余宽度 {remaining_width:.2f}m")
+            return {direction: remaining_width, "backward": 0.0}
+        
+        # For bidirectional roads, calculate each direction separately
+        forward_lanes = [lane for lane in lane_info if lane['direction'] == 'forward']
+        backward_lanes = [lane for lane in lane_info if lane['direction'] == 'backward']
+        
+        forward_width = sum(lane['width'] for lane in forward_lanes)
+        backward_width = sum(lane['width'] for lane in backward_lanes)
+        
+        print(f"  双向道路车道配置:")
+        print(f"    前进方向: {len(forward_lanes)}车道, 总宽度 {forward_width:.1f}m")
+        print(f"    后退方向: {len(backward_lanes)}车道, 总宽度 {backward_width:.1f}m")
+        
+        # Calculate which side of the road is more blocked
+        remaining_widths = self._calculate_side_specific_blockage(
+            road_polygon, intersection, forward_width, backward_width
+        )
+        
+        print(f"  分向剩余宽度: 前进 {remaining_widths['forward']:.2f}m, 后退 {remaining_widths['backward']:.2f}m")
+        
+        return remaining_widths
+    
+    def _calculate_side_specific_blockage(
+        self,
+        road_polygon: Polygon,
+        intersection: Polygon, 
+        forward_width: float,
+        backward_width: float
+    ) -> Dict[str, float]:
+        """
+        Calculate blockage for left and right sides of the road separately.
+        
+        Taiwan traffic: 
+        - Right side = Forward direction
+        - Left side = Backward direction
+        """
+        from shapely.geometry import LineString
+        
+        # Get road centerline and direction
+        road_bounds = road_polygon.bounds
+        road_dx = road_bounds[2] - road_bounds[0]
+        road_dy = road_bounds[3] - road_bounds[1]
+        
+        is_horizontal = road_dx > road_dy
+        
+        # Sample multiple cross-sections to find worst-case blockage
+        num_samples = 5
+        min_forward_width = forward_width
+        min_backward_width = backward_width
+        
+        if is_horizontal:
+            # Road runs horizontally
+            start_x = road_bounds[0]
+            end_x = road_bounds[2]
+            center_y = (road_bounds[1] + road_bounds[3]) / 2
+            
+            for i in range(num_samples):
+                sample_x = start_x + (end_x - start_x) * i / (num_samples - 1)
                 
-        except Exception:
-            # Fallback to percentage-based calculation
-            blocked_percentage = (intersection.area / road_polygon.area) * 100
-            return original_width * (1.0 - blocked_percentage / 100.0)
+                # Create cross-sectional line
+                cross_line = LineString([
+                    (sample_x, road_bounds[1] - 1),
+                    (sample_x, road_bounds[3] + 1)
+                ])
+                
+                # Calculate blockage at this cross-section
+                forward_remain, backward_remain = self._calculate_cross_section_directional_blockage(
+                    cross_line, road_polygon, intersection, forward_width, backward_width, center_y, True
+                )
+                
+                min_forward_width = min(min_forward_width, forward_remain)
+                min_backward_width = min(min_backward_width, backward_remain)
+                
+                print(f"    横截面 {i+1} (x={sample_x:.1f}): 前进剩余 {forward_remain:.2f}m, 后退剩余 {backward_remain:.2f}m")
+                
+        else:
+            # Road runs vertically
+            start_y = road_bounds[1]
+            end_y = road_bounds[3]
+            center_x = (road_bounds[0] + road_bounds[2]) / 2
+            
+            for i in range(num_samples):
+                sample_y = start_y + (end_y - start_y) * i / (num_samples - 1)
+                
+                # Create cross-sectional line
+                cross_line = LineString([
+                    (road_bounds[0] - 1, sample_y),
+                    (road_bounds[2] + 1, sample_y)
+                ])
+                
+                # Calculate blockage at this cross-section
+                forward_remain, backward_remain = self._calculate_cross_section_directional_blockage(
+                    cross_line, road_polygon, intersection, forward_width, backward_width, center_x, False
+                )
+                
+                min_forward_width = min(min_forward_width, forward_remain)
+                min_backward_width = min(min_backward_width, backward_remain)
+                
+                print(f"    纵截面 {i+1} (y={sample_y:.1f}): 前进剩余 {forward_remain:.2f}m, 后退剩余 {backward_remain:.2f}m")
+        
+        return {
+            "forward": max(0.0, min_forward_width),
+            "backward": max(0.0, min_backward_width)
+        }
+    
+    def _calculate_cross_section_directional_blockage(
+        self,
+        cross_line: LineString,
+        road_polygon: Polygon,
+        intersection: Polygon,
+        forward_width: float,
+        backward_width: float,
+        center_coord: float,  # center Y for horizontal roads, center X for vertical roads
+        is_horizontal: bool
+    ) -> Tuple[float, float]:
+        """
+        Calculate directional blockage at a specific cross-section.
+        
+        Returns: (forward_remaining_width, backward_remaining_width)
+        """
+        try:
+            # Get road cross-section
+            road_cross = cross_line.intersection(road_polygon)
+            if road_cross.is_empty:
+                return forward_width, backward_width
+                
+            # Get obstruction cross-section
+            obstruction_cross = cross_line.intersection(intersection)
+            if obstruction_cross.is_empty:
+                return forward_width, backward_width
+            
+            # Determine which side of the center line is blocked
+            if hasattr(obstruction_cross, 'coords'):
+                obstruction_coords = list(obstruction_cross.coords)
+            elif hasattr(obstruction_cross, 'geoms'):
+                # Handle MultiPoint or MultiLineString
+                obstruction_coords = []
+                for geom in obstruction_cross.geoms:
+                    if hasattr(geom, 'coords'):
+                        obstruction_coords.extend(geom.coords)
+            else:
+                obstruction_coords = []
+            
+            if not obstruction_coords:
+                return forward_width, backward_width
+            
+            # Calculate blockage on each side of center line
+            forward_blockage = 0.0  # Right side for Taiwan traffic
+            backward_blockage = 0.0  # Left side for Taiwan traffic
+            
+            for coord in obstruction_coords:
+                if is_horizontal:
+                    # For horizontal roads, compare Y coordinates
+                    if coord[1] > center_coord:  # Above center line (left side)
+                        backward_blockage += 0.5  # Approximate blockage
+                    else:  # Below center line (right side)
+                        forward_blockage += 0.5
+                else:
+                    # For vertical roads, compare X coordinates  
+                    if coord[0] > center_coord:  # Right of center line
+                        forward_blockage += 0.5
+                    else:  # Left of center line
+                        backward_blockage += 0.5
+            
+            # Calculate remaining widths
+            forward_remaining = max(0.0, forward_width - forward_blockage)
+            backward_remaining = max(0.0, backward_width - backward_blockage)
+            
+            return forward_remaining, backward_remaining
+            
+        except Exception as e:
+            print(f"      方向性横截面计算错误: {e}")
+            return forward_width * 0.5, backward_width * 0.5
     
     def _estimate_road_length_from_polygon(self, road_polygon: Polygon) -> float:
         """

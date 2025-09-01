@@ -85,6 +85,9 @@ class NetworkAnalyzer:
         Args:
             obstructions: List of RoadObstruction objects
         """
+        print(f"\n🚧 更新道路阻塞信息 - 共 {len(obstructions)} 個阻塞點")
+        print("=" * 80)
+        
         # Clear previous obstructions
         self.road_obstructions = {}
 
@@ -93,15 +96,31 @@ class NetworkAnalyzer:
             data["width"] = data["original_width"]
 
         # Apply new obstructions
-        for obstruction in obstructions:
+        for i, obstruction in enumerate(obstructions, 1):
             self.road_obstructions[obstruction.obstruction_id] = obstruction
 
             # Find the edge corresponding to this road
             edge = self._find_edge_by_id(obstruction.road_edge_id)
             if edge:
                 u, v = edge
+                original_width = self.road_graph[u][v]["original_width"]
+                
+                print(f"阻塞點 {i}:")
+                print(f"  📍 道路 ID: {obstruction.road_edge_id}")
+                print(f"  🌳 造成事件: {obstruction.caused_by_event}")
+                print(f"  📏 原始寬度: {original_width:.1f}m")
+                print(f"  📉 剩餘寬度: {obstruction.remaining_width:.1f}m") 
+                print(f"  🚫 阻塞程度: {obstruction.blocked_percentage:.1f}%")
+                print(f"  📊 寬度減少: {original_width - obstruction.remaining_width:.1f}m")
+                print(f"  ⚠️  影響程度: {'嚴重' if obstruction.blocked_percentage > 70 else '中等' if obstruction.blocked_percentage > 30 else '輕微'}")
+                print()
+                
                 # Update the effective width for this edge
                 self.road_graph[u][v]["width"] = obstruction.remaining_width
+            else:
+                print(f"⚠️  警告: 找不到道路 ID {obstruction.road_edge_id} 對應的邊")
+        
+        print("=" * 80)
 
     def find_path(self, request: PathfindingRequest) -> PathfindingResult:
         """
@@ -115,6 +134,11 @@ class NetworkAnalyzer:
         Returns:
             PathfindingResult with path details or failure indication
         """
+        print(f"\n🚗 開始路徑規劃")
+        print(f"起點: ({request.start_point[0]:.1f}, {request.start_point[1]:.1f})")
+        print(f"終點: ({request.end_point[0]:.1f}, {request.end_point[1]:.1f})")
+        print(f"車輛類型: {request.vehicle_type.value}")
+        
         if not self.road_graph:
             return PathfindingResult(
                 success=False,
@@ -135,6 +159,13 @@ class NetworkAnalyzer:
         vehicle_config = self.vehicle_configs.get(
             request.vehicle_type, DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
         )
+        
+        print(f"車輛配置:")
+        print(f"  寬度: {vehicle_config.width:.1f}m")
+        print(f"  長度: {vehicle_config.length:.1f}m") 
+        print(f"  最高速度: {vehicle_config.max_speed:.1f} km/h")
+        print(f"  最小道路寬度需求: {vehicle_config.minimum_road_width:.1f}m")
+        print()
 
         # Perform A* pathfinding with vehicle constraints
         try:
@@ -143,15 +174,72 @@ class NetworkAnalyzer:
             )
 
             if not path_nodes:
-                return PathfindingResult(
-                    success=False,
-                    path_coordinates=[],
-                    path_node_ids=[],
-                    total_distance=0.0,
-                    estimated_travel_time=0.0,
-                    vehicle_type=request.vehicle_type,
-                    blocked_roads=[],
+                # If complete path not found, try to find partial path
+                partial_path_result = self._find_partial_path(
+                    start_node, end_node, vehicle_config, request.max_travel_time
                 )
+                
+                if partial_path_result["path_nodes"]:
+                    # Convert partial path to coordinates and metrics
+                    partial_coordinates = self._nodes_to_coordinates(partial_path_result["path_nodes"])
+                    partial_distance = self._calculate_path_distance(partial_path_result["path_nodes"])
+                    partial_time = self._estimate_travel_time(partial_path_result["path_nodes"], vehicle_config)
+                    blocked_roads = self._identify_blocked_roads_in_path(partial_path_result["path_nodes"])
+                    
+                    # Add start point if not already exact
+                    if partial_coordinates and partial_coordinates[0] != request.start_point:
+                        start_distance = self._calculate_distance(request.start_point, partial_coordinates[0])
+                        if start_distance > 1.0:
+                            partial_coordinates.insert(0, request.start_point)
+                        else:
+                            partial_coordinates[0] = request.start_point
+                    
+                    # Clean up virtual nodes
+                    virtual_nodes_to_cleanup = []
+                    if self.road_graph.has_node(start_node) and self.road_graph.nodes[start_node].get("is_virtual", False):
+                        virtual_nodes_to_cleanup.append(start_node)
+                    if self.road_graph.has_node(end_node) and self.road_graph.nodes[end_node].get("is_virtual", False):
+                        virtual_nodes_to_cleanup.append(end_node)
+                    
+                    result = PathfindingResult(
+                        success=False,  # Still false since complete path not found
+                        path_coordinates=partial_coordinates,
+                        path_node_ids=partial_path_result["path_nodes"],
+                        total_distance=partial_distance,
+                        estimated_travel_time=partial_time,
+                        vehicle_type=request.vehicle_type,
+                        blocked_roads=blocked_roads,
+                    )
+                    
+                    # Print partial path summary
+                    print(f"\n⚠️  部分路徑規劃")
+                    print(f"原因: {partial_path_result['reason']}")
+                    print(f"可達距離: {partial_distance:.1f}m")
+                    print(f"預計時間: {partial_time:.1f}秒 ({partial_time/60:.1f}分鐘)")
+                    print(f"路徑節點: {len(partial_path_result['path_nodes'])}個")
+                    if "distance_to_destination" in partial_path_result:
+                        print(f"距離目標還有: {partial_path_result['distance_to_destination']:.1f}m")
+                    if blocked_roads:
+                        print(f"遇到阻塞道路: {len(blocked_roads)}條")
+                        for road_id in blocked_roads:
+                            print(f"  - {road_id}")
+                    print("=" * 50)
+                    
+                    if virtual_nodes_to_cleanup:
+                        self._cleanup_virtual_nodes(virtual_nodes_to_cleanup)
+                    
+                    return result
+                else:
+                    # No partial path found either
+                    return PathfindingResult(
+                        success=False,
+                        path_coordinates=[],
+                        path_node_ids=[],
+                        total_distance=0.0,
+                        estimated_travel_time=0.0,
+                        vehicle_type=request.vehicle_type,
+                        blocked_roads=[],
+                    )
 
             # Convert path to coordinates and calculate metrics
             path_coordinates = self._nodes_to_coordinates(path_nodes)
@@ -213,6 +301,19 @@ class NetworkAnalyzer:
                 vehicle_type=request.vehicle_type,
                 blocked_roads=blocked_roads,
             )
+            
+            # Print path summary
+            print(f"\n🎉 路徑規劃成功!")
+            print(f"總距離: {total_distance:.1f}m")
+            print(f"預計時間: {travel_time:.1f}秒 ({travel_time/60:.1f}分鐘)")
+            print(f"路徑節點: {len(path_nodes)}個")
+            if blocked_roads:
+                print(f"遇到阻塞道路: {len(blocked_roads)}條")
+                for road_id in blocked_roads:
+                    print(f"  - {road_id}")
+            else:
+                print("路徑暢通，無阻塞道路")
+            print("=" * 50)
 
             # Clean up virtual nodes to restore original graph
             if virtual_nodes_to_cleanup:
@@ -926,8 +1027,31 @@ class NetworkAnalyzer:
             True if vehicle can pass, False otherwise
         """
         current_width = edge_data.get("width", 6.0)
+        original_width = edge_data.get("original_width", current_width)
         min_required_width = vehicle_config.minimum_road_width
         road_type = edge_data.get("road_type", "secondary")
+        edge_id = edge_data.get("edge_id", "unknown")
+
+        # Show detailed road analysis
+        width_reduction = original_width - current_width
+        can_pass = current_width >= min_required_width
+        
+        if width_reduction > 0.1:  # Only show if there's meaningful obstruction
+            status = "✅ 可通行" if can_pass else "❌ 不可通行"
+            difficulty = ""
+            if can_pass:
+                if current_width < min_required_width * 1.2:
+                    difficulty = " (緊迫)"
+                elif current_width < min_required_width * 1.5:
+                    difficulty = " (困難)"
+                else:
+                    difficulty = " (正常)"
+            
+            print(f"🛣️  道路檢查 {edge_id[:8]}...")
+            print(f"  原始寬度: {original_width:.1f}m → 目前寬度: {current_width:.1f}m")
+            print(f"  寬度減少: {width_reduction:.1f}m ({(width_reduction/original_width*100):.1f}%)")
+            print(f"  需求寬度: {min_required_width:.1f}m")
+            print(f"  通行狀態: {status}{difficulty}")
 
         # Basic width check
         if current_width < min_required_width:
@@ -976,10 +1100,13 @@ class NetworkAnalyzer:
         speed_limit = edge_data.get("speed_limit", 40.0)  # km/h
         vehicle_max_speed = vehicle_config.max_speed
         current_width = edge_data.get("width", 6.0)
+        original_width = edge_data.get("original_width", current_width)
         min_required_width = vehicle_config.minimum_road_width
+        edge_id = edge_data.get("edge_id", "unknown")
 
         # SE-2.2: Check if vehicle can physically pass through
         if current_width < min_required_width:
+            print(f"❌ 道路 {edge_id[:8]} 不可通行: 寬度 {current_width:.1f}m < 需求 {min_required_width:.1f}m")
             return float("inf")  # Impassable - infinite cost
 
         # Calculate base travel time using SE-2.2 formula: distance / speed
@@ -990,19 +1117,36 @@ class NetworkAnalyzer:
         base_travel_time = distance / speed_ms
 
         # Apply penalties for narrow passages and obstructions
-        width_ratio = current_width / edge_data.get("original_width", current_width)
+        width_ratio = current_width / original_width
+        penalty_multiplier = 1.0
 
         if width_ratio < 0.5:
             # Severely obstructed - high time penalty
-            base_travel_time *= 3.0
+            penalty_multiplier = 3.0
+            penalty_reason = "嚴重阻塞"
         elif width_ratio < 0.7:
             # Moderately obstructed - moderate penalty
-            base_travel_time *= 2.0
+            penalty_multiplier = 2.0
+            penalty_reason = "中度阻塞"
         elif current_width < min_required_width * 1.2:
             # Tight fit - small penalty
-            base_travel_time *= 1.3
+            penalty_multiplier = 1.3
+            penalty_reason = "通行困難"
+        else:
+            penalty_reason = "正常通行"
 
-        return base_travel_time
+        final_travel_time = base_travel_time * penalty_multiplier
+        
+        # Show cost calculation details for obstructed roads
+        if penalty_multiplier > 1.1 or width_ratio < 0.9:
+            print(f"⏱️  道路成本計算 {edge_id[:8]}:")
+            print(f"  距離: {distance:.0f}m, 速度: {effective_speed:.0f}km/h")
+            print(f"  基礎時間: {base_travel_time:.1f}秒")
+            print(f"  寬度比例: {width_ratio:.2f} ({original_width:.1f}m→{current_width:.1f}m)")
+            print(f"  懲罰倍數: {penalty_multiplier:.1f}x ({penalty_reason})")
+            print(f"  最終時間: {final_travel_time:.1f}秒")
+
+        return final_travel_time
 
     def _calculate_distance(
         self, point1: Tuple[float, float], point2: Tuple[float, float]
@@ -1549,6 +1693,151 @@ class NetworkAnalyzer:
                     )
 
         return []
+
+    def _find_partial_path(
+        self,
+        start_node: str,
+        end_node: str,
+        vehicle_config: VehicleConfig,
+        max_travel_time: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Find the farthest reachable point from start node when complete path is not possible.
+        
+        This method uses Dijkstra's algorithm to explore all reachable nodes from the start
+        and returns the path to the node that is closest to the destination among all reachable nodes.
+        
+        Args:
+            start_node: Starting node ID
+            end_node: Destination node ID (used as target for direction)
+            vehicle_config: Vehicle configuration for constraints
+            max_travel_time: Maximum allowed travel time in seconds
+            
+        Returns:
+            Dictionary with 'path_nodes' and 'reason' keys
+        """
+        import heapq
+        
+        if start_node == end_node:
+            return {"path_nodes": [start_node], "reason": "start_is_destination"}
+        
+        # Get destination coordinates for distance calculation
+        end_coords = (
+            self.road_graph.nodes[end_node]["x"],
+            self.road_graph.nodes[end_node]["y"],
+        )
+        
+        # Dijkstra exploration from start node
+        distances = {start_node: 0.0}
+        previous = {start_node: None}
+        visited = set()
+        queue = [(0.0, start_node)]  # (cumulative_cost, node_id)
+        
+        # Track the closest node to destination found so far
+        closest_to_destination = start_node
+        min_distance_to_destination = float('inf')
+        
+        # Calculate initial distance to destination
+        start_coords = (
+            self.road_graph.nodes[start_node]["x"],
+            self.road_graph.nodes[start_node]["y"],
+        )
+        initial_distance = self._calculate_distance(start_coords, end_coords)
+        min_distance_to_destination = initial_distance
+        
+        max_iterations = 500  # Prevent infinite loops
+        iterations = 0
+        
+        while queue and iterations < max_iterations:
+            iterations += 1
+            cumulative_cost, current_node = heapq.heappop(queue)
+            
+            if current_node in visited:
+                continue
+                
+            visited.add(current_node)
+            
+            # Check if this node is closer to destination
+            current_coords = (
+                self.road_graph.nodes[current_node]["x"],
+                self.road_graph.nodes[current_node]["y"],
+            )
+            distance_to_destination = self._calculate_distance(current_coords, end_coords)
+            
+            if distance_to_destination < min_distance_to_destination:
+                min_distance_to_destination = distance_to_destination
+                closest_to_destination = current_node
+            
+            # If we reached the destination somehow, return complete path
+            if current_node == end_node:
+                path = self._reconstruct_path(previous, end_node)
+                return {"path_nodes": path, "reason": "complete_path_found"}
+            
+            # Explore neighbors
+            for neighbor in self.road_graph.neighbors(current_node):
+                if neighbor in visited:
+                    continue
+                    
+                edge_data = self.road_graph[current_node][neighbor]
+                
+                # Check if vehicle can use this edge
+                if not self._can_vehicle_use_edge(vehicle_config, edge_data):
+                    continue
+                
+                # Calculate cost to reach neighbor
+                edge_cost = self._calculate_edge_cost(current_node, neighbor, vehicle_config)
+                
+                # Skip if edge is impassable
+                if edge_cost == float("inf"):
+                    continue
+                
+                tentative_cost = cumulative_cost + edge_cost
+                
+                # Check time constraint
+                if max_travel_time and tentative_cost > max_travel_time:
+                    continue
+                
+                # Update if we found a better path to this neighbor
+                if neighbor not in distances or tentative_cost < distances[neighbor]:
+                    distances[neighbor] = tentative_cost
+                    previous[neighbor] = current_node
+                    heapq.heappush(queue, (tentative_cost, neighbor))
+        
+        # Reconstruct path to closest reachable node
+        if closest_to_destination != start_node:
+            path = self._reconstruct_path(previous, closest_to_destination)
+            return {
+                "path_nodes": path, 
+                "reason": f"partial_path_to_closest_reachable_point",
+                "distance_to_destination": min_distance_to_destination
+            }
+        else:
+            # Could not find any reachable nodes beyond start
+            return {
+                "path_nodes": [start_node], 
+                "reason": "no_reachable_nodes",
+                "distance_to_destination": initial_distance
+            }
+    
+    def _reconstruct_path(self, previous: Dict[str, Optional[str]], end_node: str) -> List[str]:
+        """
+        Reconstruct path from previous node tracking.
+        
+        Args:
+            previous: Dictionary mapping node_id -> previous_node_id
+            end_node: Final node in the path
+            
+        Returns:
+            List of node IDs forming the path from start to end
+        """
+        path = []
+        current = end_node
+        
+        while current is not None:
+            path.insert(0, current)
+            current = previous.get(current)
+            
+        return path
 
     def _is_path_sufficiently_different(
         self,
