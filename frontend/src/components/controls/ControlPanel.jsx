@@ -4,6 +4,9 @@ import Button from '../ui/Button';
 import Card from '../ui/Card';
 import DisasterSimulationPanel from './DisasterSimulationPanel';
 import RoutePlanningPanel from './RoutePlanningPanel';
+import AmbulanceServicePanel from './AmbulanceServicePanel';
+
+console.log('🔍 ControlPanel 正在加載，AmbulanceServicePanel 導入狀態:', AmbulanceServicePanel);
 
 const ControlPanel = () => {
   const {
@@ -506,11 +509,28 @@ const ControlPanel = () => {
           </Card>
         )}
         
+        {/* Inline Test Panel */}
+        <Card title="🧪 INLINE TEST PANEL">
+          <div className="text-red-600 font-bold">
+            這是直接內聯在 ControlPanel 中的測試面板
+          </div>
+        </Card>
+
+        {/* Ambulance Service Analysis Panel - TESTING - MOVED TO TOP */}
+        <AmbulanceServicePanel />
+        
         {/* Disaster Simulation Panel */}
         <DisasterSimulationPanel />
         
         {/* Route Planning Panel */}
         <RoutePlanningPanel />
+        
+        {/* Debug Panel */}
+        <Card title="🔧 DEBUG: Panel Visibility Test">
+          <div className="text-sm text-red-600">
+            如果您能看到這個調試面板，說明 ControlPanel 渲染是正常的
+          </div>
+        </Card>
 
         {/* Error Display */}
         {error && (

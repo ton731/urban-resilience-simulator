@@ -49,7 +49,10 @@ class MapService {
       routeEndMarker: null,
       preDisasterRoute: null,
       postDisasterRoute: null,
-      routeInfo: null
+      routeInfo: null,
+      // Ambulance service analysis layers (IA-3.1)
+      ambulanceServiceGrid: null,
+      ambulanceServiceLegend: null
     };
     this.currentMapData = null;
     this.currentDisasterData = null;
@@ -120,6 +123,10 @@ class MapService {
     this.layers.postDisasterRoute = L.layerGroup().addTo(this.map);
 
     this.layers.routeInfo = L.layerGroup().addTo(this.map);
+    
+    // Initialize ambulance service analysis layers (IA-3.1)
+    this.layers.ambulanceServiceGrid = L.layerGroup().addTo(this.map);
+    this.layers.ambulanceServiceLegend = L.layerGroup().addTo(this.map);
 
     return this.map;
   }
@@ -1986,6 +1993,277 @@ class MapService {
     }
   }
 
+  // === Ambulance Service Analysis Visualization Methods (IA-3.1) ===
+
+  /**
+   * Update map with ambulance service analysis results
+   * @param {Object} analysisData - Analysis result data from backend
+   */
+  updateAmbulanceServiceData(analysisData) {
+    if (!this.map || !this.currentMapData) {
+      console.error('Map or world data not available');
+      return;
+    }
+
+    this.clearAmbulanceServiceLayers();
+
+    // Get coordinate conversion parameters
+    const { boundary } = this.currentMapData;
+    const centerX = (boundary.min_x + boundary.max_x) / 2;
+    const centerY = (boundary.min_y + boundary.max_y) / 2;
+    const metersToLat = 1 / 111000;
+    const metersToLng = 1 / 111000;
+
+    // Render grid cells with service level colors
+    this.addAmbulanceServiceGrid(analysisData, centerX, centerY, metersToLat, metersToLng);
+    
+    // Add color legend
+    this.addAmbulanceServiceLegend(analysisData.color_legend);
+
+    console.log(`✅ Added ambulance service grid visualization: ${analysisData.grid_cells.length} cells`);
+  }
+
+  /**
+   * Add ambulance service grid visualization
+   * @param {Object} analysisData - Analysis data with grid cells
+   * @param {number} centerX - Map center X coordinate
+   * @param {number} centerY - Map center Y coordinate  
+   * @param {number} metersToLat - Meters to latitude conversion factor
+   * @param {number} metersToLng - Meters to longitude conversion factor
+   */
+  addAmbulanceServiceGrid(analysisData, centerX, centerY, metersToLat, metersToLng) {
+    if (!analysisData.grid_cells || analysisData.grid_cells.length === 0) return;
+
+    const gridSize = analysisData.grid_size_meters || 50;
+    const halfGridLat = (gridSize / 2) * metersToLat;
+    const halfGridLng = (gridSize / 2) * metersToLng;
+
+    analysisData.grid_cells.forEach(cell => {
+      // Convert cell center to lat/lng
+      const centerLat = (cell.center_point[1] - centerY) * metersToLat;
+      const centerLng = (cell.center_point[0] - centerX) * metersToLng;
+
+      // Create grid cell rectangle
+      const bounds = [
+        [centerLat - halfGridLat, centerLng - halfGridLng], // Southwest corner
+        [centerLat + halfGridLat, centerLng + halfGridLng]  // Northeast corner
+      ];
+
+      // Get color based on service level
+      const color = this._getServiceLevelColor(cell, analysisData.color_legend);
+
+      const gridRect = L.rectangle(bounds, {
+        fillColor: color,
+        color: color,
+        fillOpacity: 0.6,
+        weight: 1,
+        opacity: 0.8
+      });
+
+      // Create detailed popup based on analysis mode
+      const popupContent = this._createGridCellPopup(cell, analysisData.analysis_mode);
+      gridRect.bindPopup(popupContent);
+
+      this.layers.ambulanceServiceGrid.addLayer(gridRect);
+    });
+  }
+
+  /**
+   * Get color for service level based on response time
+   * @param {Object} cell - Grid cell data
+   * @param {Object} colorLegend - Color legend from analysis
+   * @returns {string} - Hex color code
+   */
+  _getServiceLevelColor(cell, colorLegend) {
+    // Check if cell is reachable
+    if (!cell.is_reachable) {
+      return colorLegend.unreachable || '#808080';
+    }
+
+    // Use response time to determine service level
+    const responseTime = cell.response_time_seconds;
+    
+    if (responseTime <= 300) { // ≤5 minutes
+      return colorLegend.excellent || '#22c55e';
+    } else if (responseTime <= 600) { // 5-10 minutes  
+      return colorLegend.good || '#eab308';
+    } else if (responseTime <= 900) { // 10-15 minutes
+      return colorLegend.fair || '#f97316';
+    } else { // >15 minutes
+      return colorLegend.poor || '#ef4444';
+    }
+  }
+
+  /**
+   * Create popup content for grid cell
+   * @param {Object} cell - Grid cell data
+   * @param {string} analysisMode - Analysis mode (pre_disaster, post_disaster, comparison)
+   * @returns {string} - HTML content for popup
+   */
+  _createGridCellPopup(cell, analysisMode) {
+    const isReachable = cell.is_reachable;
+    const responseTime = cell.response_time_seconds;
+    const serviceLevel = this._getServiceLevelText(responseTime);
+
+    let content = `
+      <div style="font-family: monospace; min-width: 200px;">
+        <strong>🚑 救護車服務範圍</strong><br/>
+        <hr style="margin: 8px 0;">
+        <strong>座標:</strong> (${cell.center_point[0].toFixed(1)}, ${cell.center_point[1].toFixed(1)})<br/>
+        <strong>可到達:</strong> ${isReachable ? '✅ 是' : '❌ 否'}<br/>
+    `;
+
+    if (isReachable) {
+      content += `
+        <strong>響應時間:</strong> ${Math.round(responseTime / 60)}分鐘 (${responseTime.toFixed(1)}秒)<br/>
+        <strong>服務等級:</strong> ${serviceLevel}<br/>
+        <strong>最近站點:</strong> ${cell.nearest_station_id?.substring(0, 8) || '未知'}<br/>
+      `;
+    }
+
+    // Add comparison data if available (for comparison mode)
+    if (cell.comparison_data && analysisMode === 'comparison') {
+      content += `
+        <hr style="margin: 8px 0;">
+        <strong>📊 災前災後對比:</strong><br/>
+        <small>災前時間: ${Math.round(cell.comparison_data.pre_disaster_time / 60)}分鐘</small><br/>
+        <small>災後時間: ${Math.round(cell.comparison_data.post_disaster_time / 60)}分鐘</small><br/>
+        <small>時間增加: +${Math.round(cell.comparison_data.time_increase / 60)}分鐘</small><br/>
+      `;
+    }
+
+    content += `
+        <hr style="margin: 8px 0;">
+        <small style="color: #666;">
+          網格大小: ${cell.grid_size || 50}m × ${cell.grid_size || 50}m
+        </small>
+      </div>
+    `;
+
+    return content;
+  }
+
+  /**
+   * Get service level text based on response time
+   * @param {number} responseTimeSeconds - Response time in seconds
+   * @returns {string} - Service level text
+   */
+  _getServiceLevelText(responseTimeSeconds) {
+    if (responseTimeSeconds <= 300) {
+      return '🟢 優秀 (≤5分鐘)';
+    } else if (responseTimeSeconds <= 600) {
+      return '🟡 良好 (5-10分鐘)';
+    } else if (responseTimeSeconds <= 900) {
+      return '🟠 一般 (10-15分鐘)';
+    } else {
+      return '🔴 較差 (>15分鐘)';
+    }
+  }
+
+  /**
+   * Add color legend for ambulance service levels
+   * @param {Object} colorLegend - Color legend from analysis
+   */
+  addAmbulanceServiceLegend(colorLegend) {
+    if (!colorLegend) return;
+
+    const legendContent = `
+      <div style="
+        background: rgba(255, 255, 255, 0.95);
+        padding: 12px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        font-family: monospace;
+        font-size: 12px;
+        min-width: 180px;
+      ">
+        <strong>🚑 救護車服務等級</strong><br/>
+        <hr style="margin: 8px 0;">
+        ${Object.entries(colorLegend).map(([level, color]) => {
+          const levelText = {
+            'excellent': '🟢 優秀 (≤5分鐘)',
+            'good': '🟡 良好 (5-10分鐘)',
+            'fair': '🟠 一般 (10-15分鐘)',
+            'poor': '🔴 較差 (>15分鐘)',
+            'unreachable': '⚫ 無法到達'
+          };
+          return `
+            <div style="display: flex; align-items: center; margin: 4px 0;">
+              <div style="
+                width: 16px; 
+                height: 16px; 
+                background-color: ${color}; 
+                border: 1px solid #ccc; 
+                border-radius: 3px; 
+                margin-right: 8px;
+              "></div>
+              <span>${levelText[level] || level}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+
+    // Create legend control (bottom-left corner)
+    const legendControl = L.control({ position: 'bottomleft' });
+    legendControl.onAdd = () => {
+      const div = L.DomUtil.create('div', 'ambulance-service-legend-control');
+      div.innerHTML = legendContent;
+      return div;
+    };
+
+    // Remove existing legend control if any
+    if (this._ambulanceServiceLegendControl) {
+      this.map.removeControl(this._ambulanceServiceLegendControl);
+    }
+    
+    this._ambulanceServiceLegendControl = legendControl;
+    legendControl.addTo(this.map);
+  }
+
+  /**
+   * Clear all ambulance service analysis layers
+   */
+  clearAmbulanceServiceLayers() {
+    if (this.layers.ambulanceServiceGrid) {
+      this.layers.ambulanceServiceGrid.clearLayers();
+    }
+    if (this.layers.ambulanceServiceLegend) {
+      this.layers.ambulanceServiceLegend.clearLayers();
+    }
+
+    // Remove legend control
+    if (this._ambulanceServiceLegendControl) {
+      this.map.removeControl(this._ambulanceServiceLegendControl);
+      this._ambulanceServiceLegendControl = null;
+    }
+  }
+
+  /**
+   * Toggle ambulance service layer visibility
+   * @param {string} layerName - Name of ambulance service layer
+   * @param {boolean} visible - Whether layer should be visible
+   */
+  toggleAmbulanceServiceLayer(layerName, visible) {
+    const layer = this.layers[layerName];
+    if (!layer) return;
+
+    if (visible && !this.map.hasLayer(layer)) {
+      this.map.addLayer(layer);
+    } else if (!visible && this.map.hasLayer(layer)) {
+      this.map.removeLayer(layer);
+    }
+
+    // Handle legend control visibility
+    if (layerName === 'ambulanceServiceGrid' && this._ambulanceServiceLegendControl) {
+      if (visible) {
+        this._ambulanceServiceLegendControl.addTo(this.map);
+      } else {
+        this.map.removeControl(this._ambulanceServiceLegendControl);
+      }
+    }
+  }
+
   /**
    * Destroy map instance and clean up
    */
@@ -1994,6 +2272,12 @@ class MapService {
     if (this._routeInfoControl && this.map) {
       this.map.removeControl(this._routeInfoControl);
       this._routeInfoControl = null;
+    }
+
+    // Clean up ambulance service legend control
+    if (this._ambulanceServiceLegendControl && this.map) {
+      this.map.removeControl(this._ambulanceServiceLegendControl);
+      this._ambulanceServiceLegendControl = null;
     }
 
     if (this.map) {
@@ -2033,7 +2317,10 @@ class MapService {
       routeEndMarker: null,
       preDisasterRoute: null,
       postDisasterRoute: null,
-      routeInfo: null
+      routeInfo: null,
+      // Ambulance service analysis layers (IA-3.1)
+      ambulanceServiceGrid: null,
+      ambulanceServiceLegend: null
     };
   }
 }

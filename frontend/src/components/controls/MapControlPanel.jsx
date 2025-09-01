@@ -3,6 +3,7 @@ import useSimulationStore from '../../store/useSimulationStore';
 import Card from '../ui/Card';
 import DisasterSimulationPanel from './DisasterSimulationPanel';
 import RoutePlanningPanel from './RoutePlanningPanel';
+import AmbulanceServicePanel from './AmbulanceServicePanel';
 
 const MapControlPanel = () => {
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
@@ -256,6 +257,9 @@ const MapControlPanel = () => {
         
         {/* Route Planning Panel */}
         <RoutePlanningPanel />
+        
+        {/* Ambulance Service Analysis Panel */}
+        <AmbulanceServicePanel />
 
           </div>
         </div>

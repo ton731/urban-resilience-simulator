@@ -259,6 +259,12 @@ const useSimulationStore = create((set, get) => ({
   }),
 
   /**
+   * Set error state
+   * @param {string} errorMessage - Error message to set
+   */
+  setError: (errorMessage) => set({ error: errorMessage }),
+
+  /**
    * Clear error state
    */
   clearError: () => set({ error: null }),
