@@ -85,9 +85,6 @@ class NetworkAnalyzer:
         Args:
             obstructions: List of RoadObstruction objects
         """
-        print(f"\n🚧 更新道路阻塞信息 - 共 {len(obstructions)} 個阻塞點")
-        print("=" * 80)
-
         # Clear previous obstructions
         self.road_obstructions = {}
 
@@ -104,27 +101,9 @@ class NetworkAnalyzer:
             if edge:
                 u, v = edge
                 original_width = self.road_graph[u][v]["original_width"]
-
-                print(f"阻塞點 {i}:")
-                print(f"  📍 道路 ID: {obstruction.road_edge_id}")
-                print(f"  🌳 造成事件: {obstruction.caused_by_event}")
-                print(f"  📏 原始寬度: {original_width:.1f}m")
-                print(f"  📉 剩餘寬度: {obstruction.remaining_width:.1f}m")
-                print(f"  🚫 阻塞程度: {obstruction.blocked_percentage:.1f}%")
-                print(
-                    f"  📊 寬度減少: {original_width - obstruction.remaining_width:.1f}m"
-                )
-                print(
-                    f"  ⚠️  影響程度: {'嚴重' if obstruction.blocked_percentage > 70 else '中等' if obstruction.blocked_percentage > 30 else '輕微'}"
-                )
-                print()
-
                 # Update the effective width for this edge
                 self.road_graph[u][v]["width"] = obstruction.remaining_width
-            else:
-                print(f"⚠️  警告: 找不到道路 ID {obstruction.road_edge_id} 對應的邊")
 
-        print("=" * 80)
 
     def find_path(self, request: PathfindingRequest) -> PathfindingResult:
         """
@@ -138,11 +117,6 @@ class NetworkAnalyzer:
         Returns:
             PathfindingResult with path details or failure indication
         """
-        print(f"\n🚗 開始路徑規劃")
-        print(f"起點: ({request.start_point[0]:.1f}, {request.start_point[1]:.1f})")
-        print(f"終點: ({request.end_point[0]:.1f}, {request.end_point[1]:.1f})")
-        print(f"車輛類型: {request.vehicle_type.value}")
-
         if not self.road_graph:
             return PathfindingResult(
                 success=False,
@@ -167,12 +141,6 @@ class NetworkAnalyzer:
             request.vehicle_type, DEFAULT_VEHICLE_CONFIGS[VehicleType.CAR]
         )
 
-        print(f"車輛配置:")
-        print(f"  寬度: {vehicle_config.width:.1f}m")
-        print(f"  長度: {vehicle_config.length:.1f}m")
-        print(f"  最高速度: {vehicle_config.max_speed:.1f} km/h")
-        print(f"  最小道路寬度需求: {vehicle_config.minimum_road_width:.1f}m")
-        print()
 
         # Perform A* pathfinding with vehicle constraints
         try:
@@ -238,21 +206,6 @@ class NetworkAnalyzer:
                         distance_to_destination=partial_path_result.get("distance_to_destination")
                     )
 
-                    # Print partial path summary
-                    print(f"\n⚠️  部分路徑規劃")
-                    print(f"原因: {partial_path_result['reason']}")
-                    print(f"可達距離: {partial_distance:.1f}m")
-                    print(f"預計時間: {partial_time:.1f}秒 ({partial_time/60:.1f}分鐘)")
-                    print(f"路徑節點: {len(partial_path_result['path_nodes'])}個")
-                    if "distance_to_destination" in partial_path_result:
-                        print(
-                            f"距離目標還有: {partial_path_result['distance_to_destination']:.1f}m"
-                        )
-                    if blocked_roads:
-                        print(f"遇到阻塞道路: {len(blocked_roads)}條")
-                        for road_id in blocked_roads:
-                            print(f"  - {road_id}")
-                    print("=" * 50)
 
                     if virtual_nodes_to_cleanup:
                         self._cleanup_virtual_nodes(virtual_nodes_to_cleanup)
@@ -334,19 +287,6 @@ class NetworkAnalyzer:
                 blocked_roads=blocked_roads,
             )
 
-            # Print path summary
-            print(f"\n🎉 路徑規劃成功!")
-            print(f"總距離: {total_distance:.1f}m")
-            print(f"預計時間: {travel_time:.1f}秒 ({travel_time/60:.1f}分鐘)")
-            print(f"路徑節點: {len(path_nodes)}個")
-            if blocked_roads:
-                print(f"遇到阻塞道路: {len(blocked_roads)}條")
-                for road_id in blocked_roads:
-                    print(f"  - {road_id}")
-            else:
-                print("路徑暢通，無阻塞道路")
-            print("=" * 50)
-
             # Clean up virtual nodes to restore original graph
             if virtual_nodes_to_cleanup:
                 self._cleanup_virtual_nodes(virtual_nodes_to_cleanup)
@@ -354,7 +294,6 @@ class NetworkAnalyzer:
             return result
 
         except Exception as e:
-            print(f"路徑規劃發生錯誤: {e}")
             return PathfindingResult(
                 success=False,
                 path_coordinates=[],
@@ -1068,29 +1007,6 @@ class NetworkAnalyzer:
         road_type = edge_data.get("road_type", "secondary")
         edge_id = edge_data.get("edge_id", "unknown")
 
-        # Show detailed road analysis
-        width_reduction = original_width - current_width
-        can_pass = current_width >= min_required_width
-
-        if width_reduction > 0.1:  # Only show if there's meaningful obstruction
-            status = "✅ 可通行" if can_pass else "❌ 不可通行"
-            difficulty = ""
-            if can_pass:
-                if current_width < min_required_width * 1.2:
-                    difficulty = " (緊迫)"
-                elif current_width < min_required_width * 1.5:
-                    difficulty = " (困難)"
-                else:
-                    difficulty = " (正常)"
-
-            print(f"🛣️  道路檢查 {edge_id[:8]}...")
-            print(f"  原始寬度: {original_width:.1f}m → 目前寬度: {current_width:.1f}m")
-            print(
-                f"  寬度減少: {width_reduction:.1f}m ({(width_reduction/original_width*100):.1f}%)"
-            )
-            print(f"  需求寬度: {min_required_width:.1f}m")
-            print(f"  通行狀態: {status}{difficulty}")
-
         # Basic width check
         if current_width < min_required_width:
             return False
@@ -1144,9 +1060,6 @@ class NetworkAnalyzer:
 
         # SE-2.2: Check if vehicle can physically pass through
         if current_width < min_required_width:
-            print(
-                f"❌ 道路 {edge_id[:8]} 不可通行: 寬度 {current_width:.1f}m < 需求 {min_required_width:.1f}m"
-            )
             return float("inf")  # Impassable - infinite cost
 
         # Calculate base travel time using SE-2.2 formula: distance / speed
@@ -1176,17 +1089,6 @@ class NetworkAnalyzer:
             penalty_reason = "正常通行"
 
         final_travel_time = base_travel_time * penalty_multiplier
-
-        # Show cost calculation details for obstructed roads
-        if penalty_multiplier > 1.1 or width_ratio < 0.9:
-            print(f"⏱️  道路成本計算 {edge_id[:8]}:")
-            print(f"  距離: {distance:.0f}m, 速度: {effective_speed:.0f}km/h")
-            print(f"  基礎時間: {base_travel_time:.1f}秒")
-            print(
-                f"  寬度比例: {width_ratio:.2f} ({original_width:.1f}m→{current_width:.1f}m)"
-            )
-            print(f"  懲罰倍數: {penalty_multiplier:.1f}x ({penalty_reason})")
-            print(f"  最終時間: {final_travel_time:.1f}秒")
 
         return final_travel_time
 
