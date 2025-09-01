@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 
 class WorldGenerationRequest(BaseModel):
@@ -106,5 +106,152 @@ class WorldGenerationRequest(BaseModel):
                     "main_road_width": 12.0,
                     "secondary_road_width": 6.0
                 }
+            }
+        }
+
+
+class DisasterSimulationRequest(BaseModel):
+    """Request schema for disaster simulation API (SE-2.1)"""
+    
+    # World state input (from World Synthesizer)
+    world_generation_id: str = Field(
+        description="ID of the generated world to simulate disasters on"
+    )
+    
+    # Disaster configuration
+    disaster_intensity: float = Field(
+        ge=1.0, 
+        le=10.0,
+        description="Overall disaster intensity parameter (1-10 scale)"
+    )
+    
+    # Optional custom vulnerability collapse rates
+    vulnerability_collapse_rates: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Custom collapse probability by vulnerability level (I/II/III)"
+    )
+    
+    # Simulation settings
+    random_seed: Optional[int] = Field(
+        default=None,
+        description="Random seed for reproducible simulations"
+    )
+    
+    include_minor_debris: bool = Field(
+        default=False,
+        description="Whether to simulate minor debris effects"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "world_generation_id": "gen_123456789",
+                "disaster_intensity": 7.5,
+                "vulnerability_collapse_rates": {
+                    "I": 0.8,
+                    "II": 0.5, 
+                    "III": 0.1
+                },
+                "random_seed": 42,
+                "include_minor_debris": False
+            }
+        }
+
+
+class PathfindingRequest(BaseModel):
+    """Request schema for pathfinding API (SE-2.2)"""
+    
+    # World and simulation context
+    world_generation_id: str = Field(
+        description="ID of the generated world"
+    )
+    
+    simulation_id: Optional[str] = Field(
+        default=None,
+        description="Optional simulation ID for post-disaster pathfinding"
+    )
+    
+    # Path parameters
+    start_point: Tuple[float, float] = Field(
+        description="Starting coordinates [x, y]"
+    )
+    
+    end_point: Tuple[float, float] = Field(
+        description="Destination coordinates [x, y]"
+    )
+    
+    # Vehicle configuration
+    vehicle_type: str = Field(
+        default="car",
+        description="Vehicle type: pedestrian, motorcycle, car, ambulance, fire_truck"
+    )
+    
+    # Optional constraints
+    max_travel_time: Optional[float] = Field(
+        default=None,
+        description="Maximum travel time in seconds (None for no limit)"
+    )
+    
+    find_alternatives: bool = Field(
+        default=False,
+        description="Whether to find alternative routes"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "world_generation_id": "gen_123456789",
+                "simulation_id": "sim_987654321",
+                "start_point": [500.0, 500.0],
+                "end_point": [1500.0, 1200.0],
+                "vehicle_type": "ambulance",
+                "max_travel_time": 900.0,
+                "find_alternatives": True
+            }
+        }
+
+
+class ServiceAreaRequest(BaseModel):
+    """Request schema for service area calculation API"""
+    
+    # World and simulation context  
+    world_generation_id: str = Field(
+        description="ID of the generated world"
+    )
+    
+    simulation_id: Optional[str] = Field(
+        default=None,
+        description="Optional simulation ID for post-disaster analysis"
+    )
+    
+    # Service area parameters
+    center_point: Tuple[float, float] = Field(
+        description="Center coordinates for service area [x, y]"
+    )
+    
+    vehicle_type: str = Field(
+        default="ambulance",
+        description="Vehicle type for service area calculation"
+    )
+    
+    max_travel_time: float = Field(
+        gt=0.0,
+        description="Maximum travel time in seconds"
+    )
+    
+    time_intervals: Optional[List[float]] = Field(
+        default=None,
+        description="Time intervals for multiple isochrones (e.g., [300, 600, 900] for 5, 10, 15 minutes)"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "world_generation_id": "gen_123456789", 
+                "simulation_id": "sim_987654321",
+                "center_point": [1000.0, 1000.0],
+                "vehicle_type": "ambulance",
+                "max_travel_time": 900.0,
+                "time_intervals": [300.0, 600.0, 900.0]
             }
         }

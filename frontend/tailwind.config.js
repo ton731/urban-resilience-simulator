@@ -7,8 +7,8 @@ export default {
   theme: {
     extend: {
       colors: {
-        'main-road': '#ff0000',
-        'secondary-road': '#0000ff',
+        'main-road': '#cccccc',
+        'secondary-road': '#999999',
         'intersection': '#ff7800'
       },
       fontFamily: {

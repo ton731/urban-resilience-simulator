@@ -67,6 +67,121 @@ export const worldAPI = {
   }
 };
 
+// Disaster Simulation API (SE-2.1)
+export const simulationAPI = {
+  /**
+   * Run disaster simulation on a generated world
+   * @param {Object} config - Disaster simulation configuration
+   * @returns {Promise} - API response with disaster simulation results
+   */
+  runDisasterSimulation: async (config) => {
+    try {
+      const response = await apiClient.post('/simulation/disaster', config);
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to run disaster simulation: ${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  /**
+   * Find path between two points with vehicle constraints
+   * @param {Object} pathRequest - Pathfinding request
+   * @returns {Promise} - Path result
+   */
+  findPath: async (pathRequest) => {
+    try {
+      const response = await apiClient.post('/simulation/pathfinding', pathRequest);
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to find path: ${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  /**
+   * Calculate service area from a center point
+   * @param {Object} serviceAreaRequest - Service area request
+   * @returns {Promise} - Service area result
+   */
+  calculateServiceArea: async (serviceAreaRequest) => {
+    try {
+      const response = await apiClient.post('/simulation/service-area', serviceAreaRequest);
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to calculate service area: ${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  /**
+   * Get list of all simulation results
+   * @returns {Promise} - List of simulations
+   */
+  getSimulations: async () => {
+    try {
+      const response = await apiClient.get('/simulation/simulations');
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to get simulations: ${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  /**
+   * Get detailed results for a specific simulation
+   * @param {string} simulationId - Simulation ID
+   * @returns {Promise} - Simulation result details
+   */
+  getSimulationResult: async (simulationId) => {
+    try {
+      const response = await apiClient.get(`/simulation/simulation/${simulationId}`);
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to get simulation result: ${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  /**
+   * Find alternative paths between two points (SE-2.2 Advanced)
+   * @param {Object} pathRequest - Pathfinding request
+   * @param {number} maxAlternatives - Maximum number of alternative paths
+   * @param {number} diversityFactor - Factor to increase cost of previously used edges
+   * @returns {Promise} - Alternative paths result
+   */
+  findAlternativePaths: async (pathRequest, maxAlternatives = 3, diversityFactor = 1.5) => {
+    try {
+      const response = await apiClient.post('/simulation/pathfinding/alternatives', pathRequest, {
+        params: {
+          max_alternatives: maxAlternatives,
+          diversity_factor: diversityFactor
+        }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to find alternative paths: ${error.response?.data?.detail || error.message}`);
+    }
+  },
+
+  /**
+   * Analyze road network connectivity for a vehicle type
+   * @param {string} worldGenerationId - World generation ID
+   * @param {string} vehicleType - Vehicle type (pedestrian, motorcycle, car, ambulance, fire_truck)
+   * @param {string} simulationId - Optional simulation ID for post-disaster analysis
+   * @returns {Promise} - Network connectivity analysis
+   */
+  analyzeNetworkConnectivity: async (worldGenerationId, vehicleType = 'car', simulationId = null) => {
+    try {
+      const response = await apiClient.post('/simulation/network-analysis', null, {
+        params: {
+          world_generation_id: worldGenerationId,
+          vehicle_type: vehicleType,
+          simulation_id: simulationId
+        }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(`Failed to analyze network connectivity: ${error.response?.data?.detail || error.message}`);
+    }
+  }
+};
+
 // Health check API
 export const healthAPI = {
   /**

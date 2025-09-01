@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import useSimulationStore from '../../store/useSimulationStore';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
+import DisasterSimulationPanel from './DisasterSimulationPanel';
+import RoutePlanningPanel from './RoutePlanningPanel';
 
 const ControlPanel = () => {
   const {
@@ -300,7 +302,6 @@ const ControlPanel = () => {
           <div className="space-y-3">
             {/* Road Layers */}
             {Object.entries({
-              nodes: '節點 (Nodes)',
               mainRoads: '主幹道 (Main Roads)', 
               secondaryRoads: '次要道路 (Secondary Roads)'
             }).map(([layerKey, layerLabel]) => (
@@ -459,10 +460,6 @@ const ControlPanel = () => {
           <Card title="地圖統計 (Statistics)">
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-gray-600">總節點:</span>
-                <span className="font-medium">{mapStats.totalNodes}</span>
-              </div>
-              <div className="flex justify-between">
                 <span className="text-gray-600">總道路:</span>
                 <span className="font-medium">{mapStats.totalEdges}</span>
               </div>
@@ -508,6 +505,12 @@ const ControlPanel = () => {
             </div>
           </Card>
         )}
+        
+        {/* Disaster Simulation Panel */}
+        <DisasterSimulationPanel />
+        
+        {/* Route Planning Panel */}
+        <RoutePlanningPanel />
 
         {/* Error Display */}
         {error && (

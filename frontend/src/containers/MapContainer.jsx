@@ -9,7 +9,16 @@ const MapContainer = () => {
   const { 
     mapData, 
     layerVisibility, 
-    isLoading 
+    isLoading,
+    disasterSimulationData,
+    disasterLayerVisibility,
+    isRunningSimulation,
+    // Route planning state
+    routePlanning,
+    routeLayerVisibility,
+    // Route planning actions
+    setRouteStartPoint,
+    setRouteEndPoint
   } = useSimulationStore();
 
   // Initialize map on component mount
@@ -43,6 +52,9 @@ const MapContainer = () => {
         console.log('🗺️ Updating map with new data...');
         mapService.updateMapData(mapData);
         console.log('✅ Map updated successfully');
+        
+        // Clear previous route data when new map is loaded
+        mapService.clearAllRoutes();
       } catch (error) {
         console.error('❌ Failed to update map:', error);
       }
@@ -72,17 +84,104 @@ const MapContainer = () => {
     }
   }, [layerVisibility]);
 
+  // Update map with disaster simulation data
+  useEffect(() => {
+    if (disasterSimulationData && mapInstanceRef.current) {
+      try {
+        console.log('🔥 Updating map with disaster simulation data...');
+        mapService.updateDisasterData(disasterSimulationData);
+        console.log('✅ Disaster simulation visualization updated successfully');
+      } catch (error) {
+        console.error('❌ Failed to update disaster visualization:', error);
+      }
+    }
+  }, [disasterSimulationData]);
+
+  // Update disaster layer visibility when settings change
+  useEffect(() => {
+    if (mapInstanceRef.current && disasterSimulationData) {
+      Object.entries(disasterLayerVisibility).forEach(([layerName, visible]) => {
+        mapService.toggleDisasterLayer(layerName, visible);
+      });
+    }
+  }, [disasterLayerVisibility, disasterSimulationData]);
+
+  // Handle route waypoint setting interactions
+  useEffect(() => {
+    if (mapInstanceRef.current && mapData) {
+      if (routePlanning.isSettingStartPoint || routePlanning.isSettingEndPoint) {
+        // Set up map click handler for waypoint selection
+        const handleWaypointClick = (worldCoords, latLng) => {
+          if (routePlanning.isSettingStartPoint) {
+            setRouteStartPoint(worldCoords);
+          } else if (routePlanning.isSettingEndPoint) {
+            setRouteEndPoint(worldCoords);
+          }
+        };
+        
+        mapService.setRouteWaypointClickHandler(handleWaypointClick);
+      } else {
+        // Remove click handler when not setting waypoints
+        mapService.removeRouteWaypointClickHandler();
+      }
+    }
+    
+    // Cleanup on unmount or when setting mode changes
+    return () => {
+      if (mapInstanceRef.current) {
+        mapService.removeRouteWaypointClickHandler();
+      }
+    };
+  }, [routePlanning.isSettingStartPoint, routePlanning.isSettingEndPoint, mapData, setRouteStartPoint, setRouteEndPoint]);
+
+  // Update route waypoints visualization
+  useEffect(() => {
+    if (mapInstanceRef.current && mapData) {
+      mapService.updateRouteWaypoints(routePlanning.startPoint, routePlanning.endPoint);
+    }
+  }, [routePlanning.startPoint, routePlanning.endPoint, mapData]);
+
+  // Update route visualization
+  useEffect(() => {
+    if (mapInstanceRef.current && mapData && 
+        (routePlanning.preDisasterRoute || routePlanning.postDisasterRoute)) {
+      const routeData = {
+        preDisasterRoute: routePlanning.preDisasterRoute,
+        postDisasterRoute: routePlanning.postDisasterRoute,
+        routeStats: routePlanning.routeStats
+      };
+      
+      mapService.updateRouteVisualization(routeData);
+    }
+  }, [
+    routePlanning.preDisasterRoute, 
+    routePlanning.postDisasterRoute, 
+    routePlanning.routeStats,
+    mapData
+  ]);
+
+  // Update route layer visibility
+  useEffect(() => {
+    if (mapInstanceRef.current) {
+      Object.entries(routeLayerVisibility).forEach(([layerName, visible]) => {
+        mapService.toggleRouteLayer(layerName, visible);
+      });
+    }
+  }, [routeLayerVisibility]);
+
   return (
     <div className="relative flex-1 bg-gray-100">
       {/* Loading Overlay */}
-      {isLoading && (
+      {(isLoading || isRunningSimulation) && (
         <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg flex items-center space-x-3">
             <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span className="text-lg font-medium text-gray-900">生成地圖中...</span>
+            <span className="text-lg font-medium text-gray-900">
+              {isLoading ? '生成地圖中...' : isRunningSimulation ? '災害模擬中...' : '處理中...'}
+            </span>
           </div>
         </div>
       )}
@@ -123,24 +222,8 @@ const MapContainer = () => {
           <h4 className="font-medium mb-2">圖例 Legend</h4>
           <div className="space-y-1">
             <div className="flex items-center space-x-2">
-              <div className="w-6 h-3 bg-red-400 border border-red-800"></div>
-              <span>主幹道 Main Roads (雙向)</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-6 h-3 bg-red-300 border border-red-800" style={{ opacity: 0.7, borderStyle: 'dashed' }}></div>
-              <span>主幹道 Main Roads (單向)</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-6 h-3 bg-blue-400 border border-blue-800"></div>
-              <span>次要道路 Secondary Roads (雙向)</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-6 h-3 bg-blue-300 border border-blue-800" style={{ opacity: 0.7, borderStyle: 'dashed' }}></div>
-              <span>次要道路 Secondary Roads (單向)</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 bg-orange-400 rounded-full"></div>
-              <span>交叉路口 Intersections</span>
+              <div className="w-6 h-3 bg-black border border-black"></div>
+              <span>道路 Roads</span>
             </div>
             {mapData && mapData.facility_count > 0 && (
               <>
@@ -296,6 +379,133 @@ const MapContainer = () => {
                   }}>🏭</div>
                   <span>工業建築 Industrial</span>
                 </div>
+              </>
+            )}
+            
+            {/* Disaster Simulation Legend */}
+            {disasterSimulationData && (
+              <>
+                <div className="border-t border-gray-300 pt-2 mt-2">
+                  <h5 className="font-medium mb-1 text-orange-800">🔥 災害模擬結果</h5>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '20px',
+                    height: '3px',
+                    background: '#8B4513',
+                    borderRadius: '2px'
+                  }}></div>
+                  <span>倒塌樹木 Collapsed Trees</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '12px',
+                    height: '12px',
+                    background: '#8FBC8F',
+                    border: '2px solid #654321',
+                    borderRadius: '50%'
+                  }}></div>
+                  <span>樹冠 Tree Crowns</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '16px',
+                    height: '16px',
+                    background: 'rgba(255, 107, 107, 0.3)',
+                    border: '2px dashed #FF6B6B'
+                  }}></div>
+                  <span>樹木阻塞區域 Tree Blockage</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div style={{
+                    width: '16px',
+                    height: '16px',
+                    background: 'rgba(255, 68, 68, 0.5)',
+                    border: '3px dashed #FF4444'
+                  }}></div>
+                  <span>道路阻塞 Road Obstructions</span>
+                </div>
+                <div className="text-xs text-orange-700 mt-1">
+                  總計 {disasterSimulationData.total_trees_affected} 棵樹倒塌，
+                  {disasterSimulationData.total_roads_affected} 條道路受影響
+                </div>
+              </>
+            )}
+
+            {/* Route Planning Legend */}
+            {(routePlanning.preDisasterRoute || routePlanning.postDisasterRoute) && (
+              <>
+                <div className="border-t border-gray-300 pt-2 mt-2">
+                  <h5 className="font-medium mb-1 text-blue-800">🗺️ 路線規劃結果</h5>
+                  <p className="text-xs text-gray-600 mb-2">
+                    注意：所有道路現在都是灰色，路徑會以綠色(災前)和紅色(災後)清楚顯示
+                  </p>
+                </div>
+                {(routePlanning.startPoint || routePlanning.endPoint) && (
+                  <>
+                    <div className="flex items-center space-x-2">
+                      <div style={{
+                        width: '20px',
+                        height: '20px',
+                        backgroundColor: '#10b981',
+                        border: '3px solid white',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '10px',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                      }}>🟢</div>
+                      <span>起點 Start Point</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <div style={{
+                        width: '20px',
+                        height: '20px',
+                        backgroundColor: '#ef4444',
+                        border: '3px solid white',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '10px',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                      }}>🔴</div>
+                      <span>終點 End Point</span>
+                    </div>
+                  </>
+                )}
+                {routePlanning.preDisasterRoute?.success && (
+                  <div className="flex items-center space-x-2">
+                    <div style={{
+                      width: '20px',
+                      height: '4px',
+                      background: '#10b981',
+                      borderRadius: '2px'
+                    }}></div>
+                    <span>災前路徑 Pre-disaster Route (綠色)</span>
+                  </div>
+                )}
+                {routePlanning.postDisasterRoute?.success && (
+                  <div className="flex items-center space-x-2">
+                    <div style={{
+                      width: '20px',
+                      height: '4px',
+                      background: '#ef4444',
+                      borderRadius: '2px'
+                    }}></div>
+                    <span>災後路徑 Post-disaster Route (紅色)</span>
+                  </div>
+                )}
+
+                {routePlanning.routeStats && (
+                  <div className="text-xs text-blue-700 mt-1">
+                    車輛: {routePlanning.vehicleType} |
+                    {routePlanning.routeStats.distanceIncrease !== undefined && (
+                      <> 距離變化: {routePlanning.routeStats.distanceIncrease > 0 ? '+' : ''}{routePlanning.routeStats.distanceIncrease.toFixed(0)}m</>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>

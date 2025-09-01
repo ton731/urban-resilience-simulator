@@ -37,9 +37,23 @@ class MapService {
       buildingsResidential: null,
       buildingsCommercial: null,
       buildingsMixed: null,
-      buildingsIndustrial: null
+      buildingsIndustrial: null,
+      // Disaster simulation layers (SE-2.1)
+      collapsedTrees: null,
+      treeBlockages: null,
+      roadObstructions: null,
+      servicePath: null,
+      serviceArea: null,
+      // Route planning layers (SE-2.2)
+      routeStartMarker: null,
+      routeEndMarker: null,
+      preDisasterRoute: null,
+      postDisasterRoute: null,
+      routeInfo: null
     };
     this.currentMapData = null;
+    this.currentDisasterData = null;
+    this.currentRouteData = null;
   }
 
   /**
@@ -91,6 +105,21 @@ class MapService {
     this.layers.buildingsCommercial = L.layerGroup().addTo(this.map);
     this.layers.buildingsMixed = L.layerGroup().addTo(this.map);
     this.layers.buildingsIndustrial = L.layerGroup().addTo(this.map);
+    
+    // Initialize disaster simulation layers (SE-2.1)
+    this.layers.collapsedTrees = L.layerGroup().addTo(this.map);
+    this.layers.treeBlockages = L.layerGroup().addTo(this.map);
+    this.layers.roadObstructions = L.layerGroup().addTo(this.map);
+    this.layers.servicePath = L.layerGroup().addTo(this.map);
+    this.layers.serviceArea = L.layerGroup().addTo(this.map);
+
+    // Initialize route planning layers (SE-2.2)
+    this.layers.routeStartMarker = L.layerGroup().addTo(this.map);
+    this.layers.routeEndMarker = L.layerGroup().addTo(this.map);
+    this.layers.preDisasterRoute = L.layerGroup().addTo(this.map);
+    this.layers.postDisasterRoute = L.layerGroup().addTo(this.map);
+
+    this.layers.routeInfo = L.layerGroup().addTo(this.map);
 
     return this.map;
   }
@@ -128,9 +157,6 @@ class MapService {
       convertedNodes[nodeId] = { ...node, lat, lng };
     });
 
-    // Add nodes to map
-    this.addNodes(convertedNodes);
-    
     // Add edges (roads) to map
     this.addEdges(edges, convertedNodes);
     
@@ -200,37 +226,81 @@ class MapService {
       // Create road polygon with actual width
       const roadPolygon = this._createRoadPolygon(fromNode, toNode, edge);
       
-      // Style based on road type and direction
+      // Style for realistic black road surface
       const roadOptions = {
-        color: isMainRoad ? '#8b0000' : '#00008b', // Darker borders
-        fillColor: isMainRoad ? '#ff4444' : '#4444ff',
-        fillOpacity: 0.7,
-        weight: 2,
-        opacity: 0.9
+        color: '#333333', // Dark border for all roads
+        fillColor: '#2c2c2c', // Black road surface like real asphalt
+        fillOpacity: 0.9,
+        weight: 1,
+        opacity: 0.8
       };
-
-      // Different styling for one-way roads
-      if (!edge.is_bidirectional) {
-        roadOptions.fillColor = isMainRoad ? '#ff6666' : '#6666ff';
-        roadOptions.fillOpacity = 0.5;
-        // Add arrow pattern for one-way roads
-        roadOptions.dashArray = '10, 5';
-      }
 
       const road = L.polygon(roadPolygon, roadOptions);
       
-      // Add direction arrow for one-way roads
-      if (!edge.is_bidirectional) {
-        const arrowLatLng = this._getArrowPosition(fromNode, toNode);
-        const arrow = this._createDirectionArrow(arrowLatLng, this._calculateAngle(fromNode, toNode), isMainRoad);
+      // First add the road polygon to the layer
+      if (isMainRoad) {
+        this.layers.mainRoads.addLayer(road);
+      } else {
+        this.layers.secondaryRoads.addLayer(road);
+      }
+      this.layers.edges.addLayer(road);
+      
+      // THEN add lane dividers and direction indicators ON TOP of roads
+      
+      // 1. Add center divider line for bidirectional roads (AFTER road polygon)
+      if (edge.is_bidirectional) {
+        const centerLine = this._createCenterDivider(fromNode, toNode);
         
-        // Add arrow to the same layer
+        // Add to appropriate layer AFTER the road
+        if (isMainRoad) {
+          this.layers.mainRoads.addLayer(centerLine);
+        } else {
+          this.layers.secondaryRoads.addLayer(centerLine);
+        }
+        this.layers.edges.addLayer(centerLine);
+      }
+      
+      // 2. Add road surface arrows for ALL roads (AFTER road polygon and center line)
+      const primaryDirection = edge.primary_direction || this._determineDirection(fromNode, toNode);
+      
+      const roadArrows = this._createRoadSurfaceArrows(
+        fromNode, 
+        toNode, 
+        edge, 
+        primaryDirection
+      );
+      
+      // Add arrows to the same layer AFTER everything else
+      roadArrows.forEach(arrow => {
         if (isMainRoad) {
           this.layers.mainRoads.addLayer(arrow);
         } else {
           this.layers.secondaryRoads.addLayer(arrow);
         }
         this.layers.edges.addLayer(arrow);
+      });
+      
+      // Enhanced popup with lane information
+      let laneInfoHtml = '';
+      if (edge.lane_info && edge.lane_info.length > 0) {
+        const forwardLanes = edge.lane_info.filter(lane => lane.direction === 'forward');
+        const backwardLanes = edge.lane_info.filter(lane => lane.direction === 'backward');
+        
+        laneInfoHtml = `
+          <hr style="margin: 8px 0;">
+          <strong>車道配置 Lane Configuration:</strong><br/>
+        `;
+        
+        if (forwardLanes.length > 0) {
+          laneInfoHtml += `<small>🚗 前進方向: ${forwardLanes.length}車道 (${forwardLanes[0].width.toFixed(1)}m/車道)</small><br/>`;
+        }
+        if (backwardLanes.length > 0) {
+          laneInfoHtml += `<small>🚙 後退方向: ${backwardLanes.length}車道 (${backwardLanes[0].width.toFixed(1)}m/車道)</small><br/>`;
+        }
+        
+        if (edge.has_center_divider) {
+          laneInfoHtml += `<small>🛤️ 中央分隔線: 是</small><br/>`;
+        }
       }
       
       road.bindPopup(`
@@ -241,22 +311,17 @@ class MapService {
           <strong>寬度 Width:</strong> ${edge.width}m<br/>
           <strong>車道 Lanes:</strong> ${edge.lanes}<br/>
           <strong>速限 Speed Limit:</strong> ${edge.speed_limit} km/h<br/>
-          <strong>方向 Direction:</strong> ${edge.is_bidirectional ? '雙向 Bidirectional' : '單向 One-way'}<br/>
+          <strong>方向 Direction:</strong> ${edge.is_bidirectional ? '雙向 Bidirectional' : `單向 One-way (${edge.primary_direction || 'Unknown'})`}<br/>
+          ${laneInfoHtml}
           <hr style="margin: 8px 0;">
           <small style="color: #666;">
-            ${edge.is_bidirectional ? '⟷ 雙向通行' : '→ 單向通行'}
+            ${edge.is_bidirectional ? 
+              (edge.has_center_divider ? '⟷ 雙向通行 (有分隔線)' : '⟷ 雙向通行') : 
+              `→ 單向通行 (${edge.primary_direction || '方向未知'})`
+            }
           </small>
         </div>
       `);
-
-      // Add to appropriate layer
-      if (isMainRoad) {
-        this.layers.mainRoads.addLayer(road);
-      } else {
-        this.layers.secondaryRoads.addLayer(road);
-      }
-      
-      this.layers.edges.addLayer(road);
     });
   }
 
@@ -294,33 +359,188 @@ class MapService {
   }
 
   /**
-   * Create direction arrow for one-way roads
-   * @param {Array} position - [lat, lng] position for arrow
-   * @param {number} angle - Angle in degrees for arrow direction
-   * @param {boolean} isMainRoad - Whether this is a main road
-   * @returns {Object} - Leaflet marker with arrow
+   * Create center divider line for bidirectional roads
+   * @param {Object} fromNode - Starting node with lat/lng
+   * @param {Object} toNode - Ending node with lat/lng
+   * @returns {Object} - Leaflet polyline representing center divider
    */
-  _createDirectionArrow(position, angle, isMainRoad) {
-    const arrowSize = isMainRoad ? 12 : 8;
-    const arrowColor = isMainRoad ? '#ff0000' : '#0000ff';
+  _createCenterDivider(fromNode, toNode) {
+    const centerLine = L.polyline(
+      [[fromNode.lat, fromNode.lng], [toNode.lat, toNode.lng]], 
+      {
+        color: '#FFFFFF',     // Bright white center line
+        weight: 3,            // Thicker line for better visibility
+        opacity: 1.0,         // Full opacity - no transparency issues
+        dashArray: '12, 8',   // Clear dashed pattern
+        interactive: false,   // Don't interfere with road clicks
+        bubblingMouseEvents: false, // Let mouse events pass through
+        pane: 'overlayPane'   // Ensure it's on top layer
+      }
+    );
     
-    const arrowIcon = L.divIcon({
-      html: `
-        <div style="
-          width: ${arrowSize}px; 
-          height: ${arrowSize}px; 
-          background-color: ${arrowColor}; 
-          transform: rotate(${angle}deg);
-          clip-path: polygon(0 0, 100% 50%, 0 100%);
-          border: 1px solid white;
-        "></div>
-      `,
-      className: 'direction-arrow',
-      iconSize: [arrowSize, arrowSize],
-      iconAnchor: [arrowSize/2, arrowSize/2]
+    centerLine.bindTooltip('中央分隔線', { 
+      permanent: false, 
+      direction: 'center' 
     });
+    
+    return centerLine;
+  }
 
-    return L.marker(position, { icon: arrowIcon });
+  /**
+   * Determine road direction based on coordinates
+   * @param {Object} fromNode - Starting node with lat/lng
+   * @param {Object} toNode - Ending node with lat/lng
+   * @returns {string} - Direction: north/south/east/west
+   */
+  _determineDirection(fromNode, toNode) {
+    const dx = toNode.lng - fromNode.lng;
+    const dy = toNode.lat - fromNode.lat;
+    
+    if (Math.abs(dx) > Math.abs(dy)) {
+      return dx > 0 ? 'east' : 'west';
+    } else {
+      return dy > 0 ? 'north' : 'south';
+    }
+  }
+
+  /**
+   * Create road surface arrows painted directly on the road
+   * @param {Object} fromNode - Starting node with lat/lng
+   * @param {Object} toNode - Ending node with lat/lng
+   * @param {Object} edge - Road edge data
+   * @param {string} primaryDirection - Primary direction (north/south/east/west)
+   * @returns {Array} - Array of Leaflet polygons representing arrows
+   */
+  _createRoadSurfaceArrows(fromNode, toNode, edge, primaryDirection) {
+    const arrows = [];
+    const isMainRoad = edge.road_type === 'main';
+    const roadWidth = edge.width || (isMainRoad ? 12 : 6);
+    
+    // Calculate road direction and length
+    const dx = toNode.lng - fromNode.lng;
+    const dy = toNode.lat - fromNode.lat;
+    const roadLength = Math.sqrt(dx * dx + dy * dy);
+    
+    // Unit direction vector
+    const unitX = dx / roadLength;
+    const unitY = dy / roadLength;
+    
+    // Perpendicular vector for road width
+    const perpX = -unitY;
+    const perpY = unitX;
+    
+    if (edge.is_bidirectional) {
+      // For bidirectional roads, create arrows on both sides
+      arrows.push(...this._createBidirectionalArrows(
+        fromNode, toNode, unitX, unitY, perpX, perpY, roadWidth, isMainRoad
+      ));
+    } else {
+      // For unidirectional roads, create arrows in the center
+      arrows.push(...this._createUnidirectionalArrows(
+        fromNode, toNode, unitX, unitY, perpX, perpY, roadWidth, isMainRoad, primaryDirection
+      ));
+    }
+    
+    return arrows;
+  }
+
+  /**
+   * Create arrows for bidirectional roads (left and right sides)
+   */
+  _createBidirectionalArrows(fromNode, toNode, unitX, unitY, perpX, perpY, roadWidth, isMainRoad) {
+    const arrows = [];
+    const arrowSpacing = isMainRoad ? 0.0008 : 0.001; // Increased spacing - less dense arrows
+    const sideOffset = roadWidth * 0.3 / 111000; // Slightly more offset from center
+    
+    // Calculate number of arrows based on road length
+    const dx = toNode.lng - fromNode.lng;
+    const dy = toNode.lat - fromNode.lat;
+    const roadLength = Math.sqrt(dx * dx + dy * dy);
+    const numArrows = Math.max(1, Math.floor(roadLength / arrowSpacing));
+    
+    for (let i = 0; i < numArrows; i++) {
+      const progress = (i + 0.5) / numArrows; // Center arrows along road
+      const centerLat = fromNode.lat + dy * progress;
+      const centerLng = fromNode.lng + dx * progress;
+      
+      // Right side arrow (forward direction)
+      const rightArrowLat = centerLat - perpY * sideOffset;
+      const rightArrowLng = centerLng - perpX * sideOffset;
+      arrows.push(this._createSingleArrow(rightArrowLat, rightArrowLng, unitX, unitY, isMainRoad, true));
+      
+      // Left side arrow (backward direction) 
+      const leftArrowLat = centerLat + perpY * sideOffset;
+      const leftArrowLng = centerLng + perpX * sideOffset;
+      arrows.push(this._createSingleArrow(leftArrowLat, leftArrowLng, -unitX, -unitY, isMainRoad, true));
+    }
+    
+    return arrows;
+  }
+
+  /**
+   * Create arrows for unidirectional roads (center)
+   */
+  _createUnidirectionalArrows(fromNode, toNode, unitX, unitY, perpX, perpY, roadWidth, isMainRoad, primaryDirection) {
+    const arrows = [];
+    const arrowSpacing = isMainRoad ? 0.0004 : 0.0005; // Spacing between arrows
+    
+    // Calculate number of arrows based on road length
+    const dx = toNode.lng - fromNode.lng;
+    const dy = toNode.lat - fromNode.lat;
+    const roadLength = Math.sqrt(dx * dx + dy * dy);
+    const numArrows = Math.max(1, Math.floor(roadLength / arrowSpacing));
+    
+    for (let i = 0; i < numArrows; i++) {
+      const progress = (i + 0.5) / numArrows; // Center arrows along road
+      const arrowLat = fromNode.lat + dy * progress;
+      const arrowLng = fromNode.lng + dx * progress;
+      
+      arrows.push(this._createSingleArrow(arrowLat, arrowLng, unitX, unitY, isMainRoad, false));
+    }
+    
+    return arrows;
+  }
+
+  /**
+   * Create a single arrow polygon on the road surface
+   */
+  _createSingleArrow(lat, lng, dirX, dirY, isMainRoad, isBidirectional) {
+    const arrowSize = isMainRoad ? 0.00003 : 0.000025; // Much smaller arrows - appropriate for road width
+    const arrowLength = arrowSize * 2;
+    
+    // Arrow head point
+    const headLat = lat + dirY * arrowLength;
+    const headLng = lng + dirX * arrowLength;
+    
+    // Arrow tail points (left and right)
+    const perpX = -dirY;
+    const perpY = dirX;
+    
+    const tailLeftLat = lat - perpY * arrowSize * 0.6;
+    const tailLeftLng = lng - perpX * arrowSize * 0.6;
+    
+    const tailRightLat = lat + perpY * arrowSize * 0.6;
+    const tailRightLng = lng + perpX * arrowSize * 0.6;
+    
+    // Create arrow polygon with high visibility
+    const arrowPolygon = L.polygon([
+      [headLat, headLng],           // Arrow tip
+      [tailLeftLat, tailLeftLng],   // Left tail
+      [lat, lng],                   // Center (back of arrow)
+      [tailRightLat, tailRightLng], // Right tail
+      [headLat, headLng]            // Close polygon
+    ], {
+      color: '#FFD700',             // Gold outline for high contrast
+      fillColor: '#FFFF00',         // Bright yellow fill - maximum visibility
+      weight: 1,                    // Visible outline
+      fillOpacity: 1.0,             // Full opacity - no transparency
+      opacity: 1.0,                 // Full outline opacity
+      interactive: false,           // Don't interfere with road clicks
+      bubblingMouseEvents: false,   // Let mouse events pass through to road
+      pane: 'overlayPane'          // Ensure it's on top
+    });
+    
+    return arrowPolygon;
   }
 
   /**
@@ -615,27 +835,41 @@ class MapService {
       const lat = (building.y - centerY) * metersToLat;
       const lng = (building.x - centerX) * metersToLng;
 
-      // Create building marker based on type
-      const buildingMarker = this._createBuildingIcon([lat, lng], building);
+      // Create building marker based on type (now returns rectangle scaled by footprint area)
+      const buildingMarker = this._createBuildingIcon([lat, lng], building, metersToLat, metersToLng);
 
-      // Create detailed popup
-      buildingMarker.bindPopup(`
+      // Create detailed popup content
+      const popupContent = `
         <div style="font-family: monospace; min-width: 240px;">
           <strong>${this._getBuildingEmoji(building.building_type)} ${this._getBuildingTypeName(building.building_type)}</strong><br/>
           <hr style="margin: 8px 0;">
           <strong>位置 Position:</strong> (${building.x.toFixed(1)}, ${building.y.toFixed(1)})<br/>
           <strong>樓高 Height:</strong> ${building.height.toFixed(1)}m<br/>
           <strong>樓層 Floors:</strong> ${building.floors}<br/>
-          <strong>佔地面積 Footprint:</strong> ${building.footprint_area.toFixed(0)}m²<br/>
+          <strong>佔地面積 Footprint:</strong> ${building.footprint_area.toFixed(0)}m² (${Math.sqrt(building.footprint_area).toFixed(1)}m × ${Math.sqrt(building.footprint_area).toFixed(1)}m)<br/>
           <strong>人口 Population:</strong> ${building.population} 人<br/>
           <strong>容量 Capacity:</strong> ${building.capacity} 人<br/>
           <strong>使用率 Occupancy:</strong> ${((building.population / building.capacity) * 100).toFixed(1)}%<br/>
           <hr style="margin: 8px 0;">
           <small style="color: #666;">
-            ${this._getBuildingDescription(building.building_type)}
+            ${this._getBuildingDescription(building.building_type)}<br/>
+            📐 建築物按實際佔地面積等比例顯示
           </small>
         </div>
-      `);
+      `;
+
+      // Bind popup to building marker (works for both single markers and layer groups)
+      if (buildingMarker instanceof L.LayerGroup) {
+        // For layer groups, bind popup to each layer
+        buildingMarker.eachLayer(layer => {
+          if (layer instanceof L.Rectangle || layer instanceof L.Marker) {
+            layer.bindPopup(popupContent);
+          }
+        });
+      } else {
+        // For single markers/rectangles
+        buildingMarker.bindPopup(popupContent);
+      }
 
       // Add to appropriate layers
       this.layers.buildings.addLayer(buildingMarker);
@@ -659,88 +893,126 @@ class MapService {
   }
 
   /**
-   * Create building icon based on type
+   * Create building rectangle based on footprint area
    * @param {Array} position - [lat, lng] position for building
    * @param {Object} building - Building data object
-   * @returns {Object} - Leaflet marker with building icon
+   * @param {number} metersToLat - Conversion factor for latitude
+   * @param {number} metersToLng - Conversion factor for longitude
+   * @returns {Object} - Leaflet rectangle representing the building
    */
-  _createBuildingIcon(position, building) {
+  _createBuildingIcon(position, building, metersToLat, metersToLng) {
     // Define building colors and styles by type
     const buildingStyles = {
       residential: {
-        backgroundColor: '#3b82f6', // Blue
-        borderColor: '#1e40af',
-        icon: '🏘️',
-        size: 16
+        fillColor: '#3b82f6', // Blue
+        color: '#1e40af',
+        icon: '🏘️'
       },
       commercial: {
-        backgroundColor: '#f59e0b', // Amber
-        borderColor: '#d97706',
-        icon: '🏢',
-        size: 18
+        fillColor: '#f59e0b', // Amber
+        color: '#d97706',
+        icon: '🏢'
       },
       mixed: {
-        backgroundColor: '#8b5cf6', // Purple
-        borderColor: '#7c3aed',
-        icon: '🏬',
-        size: 17
+        fillColor: '#8b5cf6', // Purple
+        color: '#7c3aed',
+        icon: '🏬'
       },
       industrial: {
-        backgroundColor: '#6b7280', // Gray
-        borderColor: '#4b5563',
-        icon: '🏭',
-        size: 19
+        fillColor: '#6b7280', // Gray
+        color: '#4b5563',
+        icon: '🏭'
       }
     };
 
     const style = buildingStyles[building.building_type] || buildingStyles.residential;
     
-    // Scale size based on building height (taller buildings are larger icons)
-    const heightFactor = Math.min(2.0, Math.max(0.8, building.height / 20)); // Scale between 0.8x and 2x
-    const adjustedSize = Math.round(style.size * heightFactor);
-
-    const buildingIcon = L.divIcon({
-      html: `
-        <div style="
-          width: ${adjustedSize}px;
-          height: ${adjustedSize}px;
-          background-color: ${style.backgroundColor};
-          border: 2px solid ${style.borderColor};
-          border-radius: 3px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: ${adjustedSize * 0.6}px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-          position: relative;
-        ">
-          ${style.icon}
-          ${building.population > 0 ? `
-            <div style="
-              position: absolute;
-              top: -8px;
-              right: -8px;
-              background-color: white;
-              color: ${style.backgroundColor};
-              border: 1px solid ${style.borderColor};
-              border-radius: 8px;
-              padding: 1px 4px;
-              font-size: 9px;
-              font-weight: bold;
-              min-width: 14px;
-              text-align: center;
-              line-height: 1;
-            ">${building.population > 99 ? '99+' : building.population}</div>
-          ` : ''}
-        </div>
-      `,
-      className: 'building-icon',
-      iconSize: [adjustedSize, adjustedSize],
-      iconAnchor: [adjustedSize/2, adjustedSize/2],
-      popupAnchor: [0, -adjustedSize/2]
+    // Calculate building dimensions based on footprint area
+    // Assume building is a square for simplicity: side_length = sqrt(area)
+    const sideLength = Math.sqrt(building.footprint_area); // meters
+    
+    // Convert meters to lat/lng offsets
+    const halfSideLat = (sideLength / 2) * metersToLat;
+    const halfSideLng = (sideLength / 2) * metersToLng;
+    
+    // Create rectangle bounds
+    const bounds = [
+      [position[0] - halfSideLat, position[1] - halfSideLng], // Southwest corner
+      [position[0] + halfSideLat, position[1] + halfSideLng]  // Northeast corner
+    ];
+    
+    // Create building rectangle
+    const buildingRectangle = L.rectangle(bounds, {
+      fillColor: style.fillColor,
+      color: style.color,
+      fillOpacity: 0.7,
+      weight: 2,
+      opacity: 0.9
     });
 
-    return L.marker(position, { icon: buildingIcon });
+    // Add building icon in the center if the building is large enough
+    if (sideLength >= 10) { // Only show icon for buildings >= 10m side length
+      // Calculate icon size more proportionally to building size
+      // For buildings 10-50m: icon size ranges from 16px to 48px
+      const iconSize = Math.min(60, Math.max(24, sideLength * 1.8)); // Icon size based on building size
+      
+      const centerIcon = L.marker(position, {
+        icon: L.divIcon({
+          html: `
+            <div style="
+              width: ${iconSize}px;
+              height: ${iconSize}px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: ${iconSize * 0.7}px;
+              text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+              pointer-events: none;
+            ">
+              ${style.icon}
+            </div>
+          `,
+          className: 'building-center-icon',
+          iconSize: [iconSize, iconSize],
+          iconAnchor: [iconSize/2, iconSize/2]
+        })
+      });
+      
+      // Create a layer group containing both rectangle and icon
+      const buildingGroup = L.layerGroup([buildingRectangle, centerIcon]);
+      
+      // Add population indicator if there are people
+      if (building.population > 0) {
+        const popIndicator = L.marker([position[0] + halfSideLat * 0.7, position[1] + halfSideLng * 0.7], {
+          icon: L.divIcon({
+            html: `
+              <div style="
+                background-color: white;
+                color: ${style.fillColor};
+                border: 2px solid ${style.color};
+                border-radius: 10px;
+                padding: 2px 6px;
+                font-size: 11px;
+                font-weight: bold;
+                text-align: center;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                white-space: nowrap;
+              ">${building.population > 99 ? '99+' : building.population}人</div>
+            `,
+            className: 'building-population',
+            iconSize: [30, 20],
+            iconAnchor: [15, 10]
+          })
+        });
+        
+        buildingGroup.addLayer(popIndicator);
+      }
+      
+      return buildingGroup;
+    } else {
+      // For small buildings, just return the rectangle
+      return buildingRectangle;
+    }
   }
 
   /**
@@ -963,15 +1235,776 @@ class MapService {
     };
   }
 
+  // === Disaster Simulation Visualization Methods (SE-2.1) ===
+
+  /**
+   * Update map with disaster simulation results
+   * @param {Object} disasterData - Disaster simulation result data
+   */
+  updateDisasterData(disasterData) {
+    if (!this.map || !this.currentMapData) {
+      console.error('Map or world data not available');
+      return;
+    }
+
+    this.currentDisasterData = disasterData;
+    this.clearDisasterLayers();
+
+    // Get coordinate conversion parameters
+    const { boundary } = this.currentMapData;
+    const centerX = (boundary.min_x + boundary.max_x) / 2;
+    const centerY = (boundary.min_y + boundary.max_y) / 2;
+    const metersToLat = 1 / 111000;
+    const metersToLng = 1 / 111000;
+
+    // Visualize collapsed trees
+    this.addCollapsedTrees(disasterData.disaster_events, centerX, centerY, metersToLat, metersToLng);
+    
+    // Visualize road obstructions
+    this.addRoadObstructions(disasterData.road_obstructions, centerX, centerY, metersToLat, metersToLng);
+  }
+
+  /**
+   * Add collapsed trees visualization with accurate fallen tree representation
+   * @param {Array} disasterEvents - Array of tree collapse events
+   * @param {number} centerX - Map center X coordinate
+   * @param {number} centerY - Map center Y coordinate  
+   * @param {number} metersToLat - Meters to latitude conversion factor
+   * @param {number} metersToLng - Meters to longitude conversion factor
+   */
+  addCollapsedTrees(disasterEvents, centerX, centerY, metersToLat, metersToLng) {
+    if (!disasterEvents || disasterEvents.length === 0) return;
+
+    disasterEvents.forEach(event => {
+      // Convert tree base position
+      const baseLat = (event.location[1] - centerY) * metersToLat;
+      const baseLng = (event.location[0] - centerX) * metersToLng;
+
+      // Calculate fallen tree end position
+      const angleRad = (event.collapse_angle * Math.PI) / 180;
+      const heightInLat = event.tree_height * metersToLat;
+      const heightInLng = event.tree_height * metersToLng;
+      
+      const endLat = baseLat + heightInLat * Math.sin(angleRad);
+      const endLng = baseLng + heightInLng * Math.cos(angleRad);
+
+      // Create line representing the fallen tree trunk
+      // Calculate appropriate trunk width for visualization (scaled for visibility)
+      const trunkWidthPixels = Math.max(3, Math.min(20, event.trunk_width * 8)); // Scale trunk width for visibility
+      const fallenTreeLine = L.polyline([[baseLat, baseLng], [endLat, endLng]], {
+        color: '#8B4513', // Brown color for tree trunk
+        weight: trunkWidthPixels,
+        opacity: 0.9,
+        lineCap: 'round'
+      });
+
+      // Add tree crown circle at the end (using real-world radius in meters)
+      const crownRadiusMeters = Math.max(2, event.tree_height * 0.4); // Crown radius based on tree height in meters
+      const crownCircle = L.circle([endLat, endLng], {
+        color: '#654321',
+        fillColor: '#8FBC8F',
+        fillOpacity: 0.6,
+        radius: crownRadiusMeters, // Leaflet circle radius is in meters when using real coordinates
+        weight: 2
+      });
+
+      // Add popup with tree information
+      const popupContent = `
+        <div class="text-sm">
+          <strong>🌳 倒塌樹木</strong><br/>
+          <strong>樹木ID:</strong> ${event.tree_id}<br/>
+          <strong>倒塌角度:</strong> ${event.collapse_angle.toFixed(1)}°<br/>
+          <strong>樹高:</strong> ${event.tree_height.toFixed(1)}m<br/>
+          <strong>樹幹寬度:</strong> ${event.trunk_width.toFixed(1)}m<br/>
+          <strong>脆弱度等級:</strong> ${event.vulnerability_level}<br/>
+          <strong>嚴重程度:</strong> ${(event.severity * 100).toFixed(1)}%
+        </div>
+      `;
+
+      fallenTreeLine.bindPopup(popupContent);
+      crownCircle.bindPopup(popupContent);
+
+      // Add to collapsed trees layer
+      this.layers.collapsedTrees.addLayer(fallenTreeLine);
+      this.layers.collapsedTrees.addLayer(crownCircle);
+
+      // Add blockage polygon visualization
+      if (event.blockage_polygon && event.blockage_polygon.length > 0) {
+        const blockageCoords = event.blockage_polygon.map(coord => [
+          (coord[1] - centerY) * metersToLat,
+          (coord[0] - centerX) * metersToLng
+        ]);
+
+        const blockagePolygon = L.polygon(blockageCoords, {
+          color: '#FF6B6B',
+          fillColor: '#FF6B6B',
+          fillOpacity: 0.3,
+          weight: 2,
+          dashArray: '5, 5'
+        });
+
+        blockagePolygon.bindPopup(`
+          <div class="text-sm">
+            <strong>🚧 樹木阻塞區域</strong><br/>
+            <strong>造成事件:</strong> ${event.tree_id}<br/>
+            <strong>阻塞面積:</strong> 約 ${(event.blockage_polygon.length * 10).toFixed(1)}m²
+          </div>
+        `);
+
+        this.layers.treeBlockages.addLayer(blockagePolygon);
+      }
+    });
+
+    console.log(`✅ Added ${disasterEvents.length} collapsed trees to visualization`);
+  }
+
+  /**
+   * Add road obstruction visualization
+   * @param {Array} roadObstructions - Array of road obstruction data
+   * @param {number} centerX - Map center X coordinate
+   * @param {number} centerY - Map center Y coordinate
+   * @param {number} metersToLat - Meters to latitude conversion factor
+   * @param {number} metersToLng - Meters to longitude conversion factor
+   */
+  addRoadObstructions(roadObstructions, centerX, centerY, metersToLat, metersToLng) {
+    if (!roadObstructions || roadObstructions.length === 0) return;
+
+    roadObstructions.forEach(obstruction => {
+      if (!obstruction.obstruction_polygon || obstruction.obstruction_polygon.length === 0) return;
+
+      // Convert obstruction polygon coordinates
+      const obstructionCoords = obstruction.obstruction_polygon.map(coord => [
+        (coord[1] - centerY) * metersToLat,
+        (coord[0] - centerX) * metersToLng
+      ]);
+
+      // Create obstruction visualization
+      const obstructionPolygon = L.polygon(obstructionCoords, {
+        color: '#FF4444',
+        fillColor: '#FF4444',
+        fillOpacity: 0.5,
+        weight: 3,
+        dashArray: '10, 5'
+      });
+
+      // Add popup with obstruction information
+      // Enhanced popup with directional blockage information
+      let directionalInfo = '';
+      if (obstruction.directional_blockage) {
+        directionalInfo = `
+          <hr style="margin: 8px 0;">
+          <strong>分向阻塞情況:</strong><br/>
+          <small>🚗 前進方向: ${obstruction.directional_blockage.forward ? obstruction.directional_blockage.forward.toFixed(1) : 'N/A'}m 剩餘</small><br/>
+          <small>🚙 後退方向: ${obstruction.directional_blockage.backward ? obstruction.directional_blockage.backward.toFixed(1) : 'N/A'}m 剩餘</small><br/>
+        `;
+        
+        if (obstruction.affected_directions && obstruction.affected_directions.length > 0) {
+          directionalInfo += `<small style="color: #d32f2f;">⚠️ 受阻方向: ${obstruction.affected_directions.join(', ')}</small><br/>`;
+        }
+      }
+      
+      const popupContent = `
+        <div class="text-sm" style="font-family: monospace;">
+          <strong>🚧 道路阻塞 Road Obstruction</strong><br/>
+          <hr style="margin: 8px 0;">
+          <strong>道路ID:</strong> ${obstruction.road_edge_id.substring(0, 8)}<br/>
+          <strong>剩餘寬度:</strong> ${obstruction.remaining_width.toFixed(1)}m<br/>
+          <strong>阻塞率:</strong> ${obstruction.blocked_percentage.toFixed(1)}%<br/>
+          <strong>造成事件:</strong> ${obstruction.caused_by_event}<br/>
+          ${directionalInfo}
+          <hr style="margin: 8px 0;">
+          <small style="color: #666;">
+            ${obstruction.remaining_width < 2.0 ? '❌ 完全阻塞' : '⚠️ 部分阻塞'}
+          </small>
+        </div>
+      `;
+
+      obstructionPolygon.bindPopup(popupContent);
+      this.layers.roadObstructions.addLayer(obstructionPolygon);
+    });
+
+    console.log(`✅ Added ${roadObstructions.length} road obstructions to visualization`);
+  }
+
+  /**
+   * Clear all disaster simulation layers
+   */
+  clearDisasterLayers() {
+    ['collapsedTrees', 'treeBlockages', 'roadObstructions', 'servicePath', 'serviceArea'].forEach(layerName => {
+      if (this.layers[layerName]) {
+        this.layers[layerName].clearLayers();
+      }
+    });
+  }
+
+  /**
+   * Toggle disaster layer visibility
+   * @param {string} layerName - Name of disaster layer
+   * @param {boolean} visible - Whether layer should be visible
+   */
+  toggleDisasterLayer(layerName, visible) {
+    const layer = this.layers[layerName];
+    if (!layer) return;
+
+    if (visible && !this.map.hasLayer(layer)) {
+      this.map.addLayer(layer);
+    } else if (!visible && this.map.hasLayer(layer)) {
+      this.map.removeLayer(layer);
+    }
+  }
+
+  /**
+   * Get disaster simulation statistics
+   * @returns {Object} - Disaster statistics
+   */
+  getDisasterStats() {
+    if (!this.currentDisasterData) return null;
+
+    return {
+      totalCollapsed: this.currentDisasterData.total_trees_affected,
+      totalObstructions: this.currentDisasterData.total_roads_affected,
+      averageBlockage: this.currentDisasterData.average_road_blockage_percentage,
+      collapsedByLevel: this.currentDisasterData.trees_affected_by_level
+    };
+  }
+
+  // === Route Planning Visualization Methods (SE-2.2) ===
+
+  /**
+   * Add route planning waypoint markers
+   * @param {Array} startPoint - [lng, lat] coordinates for start point
+   * @param {Array} endPoint - [lng, lat] coordinates for end point  
+   */
+  updateRouteWaypoints(startPoint, endPoint) {
+    if (!this.map || !this.currentMapData) return;
+
+    // Clear existing markers
+    this.clearRouteWaypoints();
+
+    const { boundary } = this.currentMapData;
+    const centerX = (boundary.min_x + boundary.max_x) / 2;
+    const centerY = (boundary.min_y + boundary.max_y) / 2;
+    const metersToLat = 1 / 111000;
+    const metersToLng = 1 / 111000;
+
+    // Add start point marker
+    if (startPoint) {
+      const startLat = (startPoint[1] - centerY) * metersToLat;
+      const startLng = (startPoint[0] - centerX) * metersToLng;
+      
+      const startMarker = this._createWaypointMarker([startLat, startLng], 'start');
+      this.layers.routeStartMarker.addLayer(startMarker);
+    }
+
+    // Add end point marker  
+    if (endPoint) {
+      const endLat = (endPoint[1] - centerY) * metersToLat;
+      const endLng = (endPoint[0] - centerX) * metersToLng;
+      
+      const endMarker = this._createWaypointMarker([endLat, endLng], 'end');
+      this.layers.routeEndMarker.addLayer(endMarker);
+    }
+  }
+
+  /**
+   * Create waypoint marker for route planning
+   * @param {Array} position - [lat, lng] position
+   * @param {string} type - 'start' or 'end'
+   * @returns {Object} - Leaflet marker
+   */
+  _createWaypointMarker(position, type) {
+    const isStart = type === 'start';
+    const markerColor = isStart ? '#10b981' : '#ef4444'; // Green for start, red for end
+    const icon = isStart ? '🟢' : '🔴';
+    const label = isStart ? '起點' : '終點';
+
+    const waypointIcon = L.divIcon({
+      html: `
+        <div style="
+          width: 30px;
+          height: 30px;
+          background-color: ${markerColor};
+          border: 3px solid white;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 16px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+          position: relative;
+        ">
+          ${icon}
+          <div style="
+            position: absolute;
+            top: 35px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: white;
+            color: ${markerColor};
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            border: 1px solid ${markerColor};
+            white-space: nowrap;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+          ">${label}</div>
+        </div>
+      `,
+      className: 'waypoint-marker',
+      iconSize: [30, 50],
+      iconAnchor: [15, 15],
+      popupAnchor: [0, -15]
+    });
+
+    const marker = L.marker(position, { icon: waypointIcon });
+    
+    marker.bindPopup(`
+      <div style="font-family: monospace;">
+        <strong>🎯 路線${label}</strong><br/>
+        <strong>座標:</strong> ${position[0].toFixed(6)}, ${position[1].toFixed(6)}<br/>
+        <small>點擊地圖其他位置可重新設定</small>
+      </div>
+    `);
+
+    return marker;
+  }
+
+  /**
+   * Clear route waypoint markers
+   */
+  clearRouteWaypoints() {
+    this.layers.routeStartMarker.clearLayers();
+    this.layers.routeEndMarker.clearLayers();
+  }
+
+  /**
+   * Update route visualization with paths
+   * @param {Object} routeData - Route planning results
+   */
+  updateRouteVisualization(routeData) {
+    if (!this.map || !this.currentMapData) return;
+
+    this.currentRouteData = routeData;
+    this.clearRoutePaths();
+
+    const { boundary } = this.currentMapData;
+    const centerX = (boundary.min_x + boundary.max_x) / 2;
+    const centerY = (boundary.min_y + boundary.max_y) / 2;
+    const metersToLat = 1 / 111000;
+    const metersToLng = 1 / 111000;
+
+    // Add pre-disaster route if available (including partial paths)
+    if (routeData.preDisasterRoute && (routeData.preDisasterRoute.success || routeData.preDisasterRoute.is_partial_path)) {
+      console.log('顯示災前路徑（包含部分路徑）');
+      this.addRouteToMap(
+        routeData.preDisasterRoute,
+        'preDisaster',
+        centerX, centerY, metersToLat, metersToLng
+      );
+    }
+
+    // Add post-disaster route if available (including partial paths)
+    if (routeData.postDisasterRoute) {
+      console.log('災後路徑數據:', {
+        success: routeData.postDisasterRoute.success,
+        is_partial_path: routeData.postDisasterRoute.is_partial_path,
+        path_coordinates_length: routeData.postDisasterRoute.path_coordinates?.length || 0,
+        partial_path_reason: routeData.postDisasterRoute.partial_path_reason
+      });
+      
+      if (routeData.postDisasterRoute.success || routeData.postDisasterRoute.is_partial_path) {
+        console.log('顯示災後路徑（包含部分路徑）');
+        this.addRouteToMap(
+          routeData.postDisasterRoute,
+          'postDisaster',
+          centerX, centerY, metersToLat, metersToLng
+        );
+      } else {
+        console.log('災後路徑不顯示：', routeData.postDisasterRoute.partial_path_reason);
+      }
+    }
+
+
+
+
+    // Add route comparison info if available
+    if (routeData.routeStats) {
+      this.addRouteComparisonInfo(routeData.routeStats);
+    }
+  }
+
+  /**
+   * Add single route to map
+   * @param {Object} route - Route data
+   * @param {string} routeType - 'preDisaster', 'postDisaster', or 'alternative'  
+   * @param {number} centerX - Map center X coordinate
+   * @param {number} centerY - Map center Y coordinate
+   * @param {number} metersToLat - Conversion factor
+   * @param {number} metersToLng - Conversion factor
+   * @param {number} altIndex - Alternative route index (for alternatives)
+   */
+  addRouteToMap(route, routeType, centerX, centerY, metersToLat, metersToLng, altIndex = 0) {
+    if (!route.path_coordinates || route.path_coordinates.length === 0) return;
+
+    // Convert coordinates
+    const routeCoords = route.path_coordinates.map(coord => [
+      (coord[1] - centerY) * metersToLat,
+      (coord[0] - centerX) * metersToLng
+    ]);
+
+    // Define route styles
+    const routeStyles = {
+      preDisaster: {
+        color: '#10b981',
+        weight: 6,
+        opacity: 0.8,
+        dashArray: null,
+        name: '災前最佳路徑'
+      },
+      postDisaster: {
+        color: '#ef4444',
+        weight: 6,
+        opacity: 0.8,
+        dashArray: null,
+        name: '災後最佳路徑'
+      },
+      alternative: {
+        color: '#8b5cf6',
+        weight: 4,
+        opacity: 0.6,
+        dashArray: '10, 5',
+        name: `替代路徑 ${altIndex + 1}`
+      }
+    };
+
+    const style = routeStyles[routeType];
+    
+    // Modify style for partial paths
+    let finalStyle = { ...style };
+    if (route.is_partial_path) {
+      // Use dashed line for partial paths and modify the name
+      finalStyle.dashArray = '15, 10';
+      finalStyle.name = `${style.name} (部分路徑)`;
+      // Make it slightly more transparent to indicate incompleteness
+      finalStyle.opacity = Math.max(0.5, finalStyle.opacity - 0.2);
+    }
+    
+    // Create route polyline
+    const routeLine = L.polyline(routeCoords, {
+      color: finalStyle.color,
+      weight: finalStyle.weight,
+      opacity: finalStyle.opacity,
+      dashArray: finalStyle.dashArray,
+      lineCap: 'round',
+      lineJoin: 'round'
+    });
+
+    // Add route information popup
+    const popupContent = `
+      <div style="font-family: monospace; min-width: 200px;">
+        <strong>🛣️ ${finalStyle.name}</strong><br/>
+        <hr style="margin: 8px 0;">
+        ${route.is_partial_path ? 
+          `<div style="background-color: #fef3c7; padding: 4px; border-radius: 4px; margin-bottom: 8px;">
+            <strong style="color: #92400e;">⚠️ 部分路徑</strong><br/>
+            <small style="color: #92400e;">${route.partial_path_reason || '無法到達完整目的地'}</small><br/>
+            ${route.distance_to_destination ? 
+              `<small style="color: #92400e;">距離目的地還有: ${route.distance_to_destination.toFixed(1)}m</small>` : ''
+            }
+          </div>` : ''
+        }
+        <strong>總距離:</strong> ${route.total_distance.toFixed(1)}m<br/>
+        <strong>預計時間:</strong> ${route.estimated_travel_time.toFixed(1)}秒<br/>
+        <strong>車輛類型:</strong> ${route.vehicle_type}<br/>
+        ${route.blocked_roads && route.blocked_roads.length > 0 ? 
+          `<strong>受阻道路:</strong> ${route.blocked_roads.length}條<br/>` : ''
+        }
+        <hr style="margin: 8px 0;">
+        <small style="color: #666;">
+          ${routeType === 'preDisaster' ? '💚 不考慮災害影響的路徑' :
+            routeType === 'postDisaster' ? '🔴 考慮災害影響的路徑' :
+            '🔮 替代路徑選項'}
+          ${route.is_partial_path ? '<br/>🚧 此路線因阻塞而無法到達原始終點' : ''}
+        </small>
+      </div>
+    `;
+
+    routeLine.bindPopup(popupContent);
+
+    // Add to appropriate layer
+    if (routeType === 'preDisaster') {
+      this.layers.preDisasterRoute.addLayer(routeLine);
+    } else if (routeType === 'postDisaster') {
+      this.layers.postDisasterRoute.addLayer(routeLine);
+    }
+
+    // Add direction arrows for better visualization
+    this.addRouteDirectionArrows(routeCoords, finalStyle.color, routeType);
+    
+    // Add special marker for partial path endpoints
+    if (route.is_partial_path && routeCoords.length > 0) {
+      const endPoint = routeCoords[routeCoords.length - 1];
+      const endMarker = L.circleMarker(endPoint, {
+        color: '#f59e0b', // Orange color
+        fillColor: '#fbbf24',
+        fillOpacity: 0.8,
+        radius: 8,
+        weight: 3
+      }).bindPopup(`
+        <div style="font-family: monospace; min-width: 150px;">
+          <strong>🚧 最遠可達點</strong><br/>
+          <small>由於災害阻塞，無法繼續前進</small><br/>
+          ${route.distance_to_destination ? 
+            `<small>距離原目的地: ${route.distance_to_destination.toFixed(1)}m</small>` : ''
+          }
+        </div>
+      `);
+      
+      // Add to appropriate layer
+      if (routeType === 'preDisaster') {
+        this.layers.preDisasterRoute.addLayer(endMarker);
+      } else if (routeType === 'postDisaster') {
+        this.layers.postDisasterRoute.addLayer(endMarker);
+      }
+    }
+  }
+
+  /**
+   * Add direction arrows along route
+   * @param {Array} routeCoords - Route coordinates
+   * @param {string} color - Arrow color
+   * @param {string} routeType - Route type for layer assignment
+   */
+  addRouteDirectionArrows(routeCoords, color, routeType) {
+    if (routeCoords.length < 2) return;
+
+    const arrowInterval = Math.max(1, Math.floor(routeCoords.length / 6)); // Show ~6 arrows per route
+    
+    for (let i = arrowInterval; i < routeCoords.length; i += arrowInterval) {
+      const prevCoord = routeCoords[i - 1];
+      const currCoord = routeCoords[i];
+      
+      // Calculate arrow angle
+      const angle = Math.atan2(currCoord[0] - prevCoord[0], currCoord[1] - prevCoord[1]) * 180 / Math.PI;
+      
+      const arrowIcon = L.divIcon({
+        html: `
+          <div style="
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-bottom: 12px solid ${color};
+            transform: rotate(${angle}deg);
+            opacity: 0.8;
+          "></div>
+        `,
+        className: 'route-arrow',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
+      });
+
+      const arrowMarker = L.marker(currCoord, { icon: arrowIcon });
+      
+      // Add to same layer as route
+      if (routeType === 'preDisaster') {
+        this.layers.preDisasterRoute.addLayer(arrowMarker);
+      } else if (routeType === 'postDisaster') {
+        this.layers.postDisasterRoute.addLayer(arrowMarker);
+      }
+    }
+  }
+
+  /**
+   * Add route comparison information overlay
+   * @param {Object} routeStats - Route comparison statistics
+   */
+  addRouteComparisonInfo(routeStats) {
+    const infoContent = `
+      <div style="
+        background: rgba(255, 255, 255, 0.95);
+        padding: 12px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        font-family: monospace;
+        font-size: 12px;
+        min-width: 200px;
+      ">
+        <strong>📊 路徑比較</strong><br/>
+        <hr style="margin: 8px 0;">
+        <strong>距離變化:</strong> ${routeStats.distanceIncrease > 0 ? '+' : ''}${routeStats.distanceIncrease.toFixed(1)}m<br/>
+        <strong>時間變化:</strong> ${routeStats.timeIncrease > 0 ? '+' : ''}${routeStats.timeIncrease.toFixed(1)}秒<br/>
+        <strong>受阻道路:</strong> ${routeStats.blockedRoadsCount}條<br/>
+        ${routeStats.distanceIncreasePercent !== 0 ? 
+          `<strong>距離增加:</strong> ${routeStats.distanceIncreasePercent.toFixed(1)}%<br/>` : ''
+        }
+        ${routeStats.timeIncreasePercent !== 0 ? 
+          `<strong>時間增加:</strong> ${routeStats.timeIncreasePercent.toFixed(1)}%<br/>` : ''
+        }
+      </div>
+    `;
+
+    // Create info control (top-right corner)
+    const infoControl = L.control({ position: 'topright' });
+    infoControl.onAdd = () => {
+      const div = L.DomUtil.create('div', 'route-info-control');
+      div.innerHTML = infoContent;
+      return div;
+    };
+
+    // Remove existing info control if any
+    if (this._routeInfoControl) {
+      this.map.removeControl(this._routeInfoControl);
+    }
+    
+    this._routeInfoControl = infoControl;
+    infoControl.addTo(this.map);
+  }
+
+  /**
+   * Clear all route paths but keep waypoints  
+   */
+  clearRoutePaths() {
+    ['preDisasterRoute', 'postDisasterRoute', 'routeInfo'].forEach(layerName => {
+      if (this.layers[layerName]) {
+        this.layers[layerName].clearLayers();
+      }
+    });
+
+    // Remove info control
+    if (this._routeInfoControl) {
+      this.map.removeControl(this._routeInfoControl);
+      this._routeInfoControl = null;
+    }
+  }
+
+  /**
+   * Clear all route-related layers
+   */
+  clearAllRoutes() {
+    ['routeStartMarker', 'routeEndMarker', 'preDisasterRoute', 
+     'postDisasterRoute', 'routeInfo'].forEach(layerName => {
+      if (this.layers[layerName]) {
+        this.layers[layerName].clearLayers();
+      }
+    });
+
+    if (this._routeInfoControl) {
+      this.map.removeControl(this._routeInfoControl);
+      this._routeInfoControl = null;
+    }
+
+    this.currentRouteData = null;
+  }
+
+  /**
+   * Toggle route layer visibility
+   * @param {string} layerName - Name of route layer
+   * @param {boolean} visible - Whether layer should be visible
+   */
+  toggleRouteLayer(layerName, visible) {
+    const layer = this.layers[layerName];
+    if (!layer) return;
+
+    if (visible && !this.map.hasLayer(layer)) {
+      this.map.addLayer(layer);
+    } else if (!visible && this.map.hasLayer(layer)) {
+      this.map.removeLayer(layer);
+    }
+
+    // Handle info control visibility
+    if (layerName === 'routeInfo' && this._routeInfoControl) {
+      if (visible) {
+        this._routeInfoControl.addTo(this.map);
+      } else {
+        this.map.removeControl(this._routeInfoControl);
+      }
+    }
+  }
+
+  /**
+   * Get route planning statistics
+   * @returns {Object} - Route statistics 
+   */
+  getRouteStats() {
+    if (!this.currentRouteData) return null;
+
+    const stats = {};
+    
+    if (this.currentRouteData.preDisasterRoute && (this.currentRouteData.preDisasterRoute.success || this.currentRouteData.preDisasterRoute.is_partial_path)) {
+      stats.preDisasterDistance = this.currentRouteData.preDisasterRoute.total_distance;
+      stats.preDisasterTime = this.currentRouteData.preDisasterRoute.estimated_travel_time;
+    }
+
+    if (this.currentRouteData.postDisasterRoute && (this.currentRouteData.postDisasterRoute.success || this.currentRouteData.postDisasterRoute.is_partial_path)) {
+      stats.postDisasterDistance = this.currentRouteData.postDisasterRoute.total_distance;
+      stats.postDisasterTime = this.currentRouteData.postDisasterRoute.estimated_travel_time;
+      stats.isPartialPath = this.currentRouteData.postDisasterRoute.is_partial_path;
+      stats.distanceToDestination = this.currentRouteData.postDisasterRoute.distance_to_destination;
+    }
+
+    if (this.currentRouteData.routeStats) {
+      stats.comparison = this.currentRouteData.routeStats;
+    }
+
+
+
+    return stats;
+  }
+
+  /**
+   * Add click handler for waypoint selection
+   * @param {Function} onMapClick - Callback function for map clicks
+   */
+  setRouteWaypointClickHandler(onMapClick) {
+    if (this.map && onMapClick) {
+      this.map.on('click', (e) => {
+        const { boundary } = this.currentMapData || {};
+        if (!boundary) return;
+
+        const centerX = (boundary.min_x + boundary.max_x) / 2;
+        const centerY = (boundary.min_y + boundary.max_y) / 2;
+        const metersToLat = 1 / 111000;
+        const metersToLng = 1 / 111000;
+
+        // Convert lat/lng back to world coordinates
+        const worldX = centerX + (e.latlng.lng / metersToLng);
+        const worldY = centerY + (e.latlng.lat / metersToLat);
+
+        onMapClick([worldX, worldY], e.latlng);
+      });
+    }
+  }
+
+  /**
+   * Remove click handler for waypoint selection
+   */
+  removeRouteWaypointClickHandler() {
+    if (this.map) {
+      this.map.off('click');
+    }
+  }
+
   /**
    * Destroy map instance and clean up
    */
   destroy() {
+    // Clean up route info control
+    if (this._routeInfoControl && this.map) {
+      this.map.removeControl(this._routeInfoControl);
+      this._routeInfoControl = null;
+    }
+
     if (this.map) {
       this.map.remove();
       this.map = null;
     }
+    
     this.currentMapData = null;
+    this.currentDisasterData = null;
+    this.currentRouteData = null;
+    
     this.layers = {
       nodes: null,
       edges: null,
@@ -988,7 +2021,19 @@ class MapService {
       buildingsResidential: null,
       buildingsCommercial: null,
       buildingsMixed: null,
-      buildingsIndustrial: null
+      buildingsIndustrial: null,
+      // Disaster simulation layers (SE-2.1)
+      collapsedTrees: null,
+      treeBlockages: null,
+      roadObstructions: null,
+      servicePath: null,
+      serviceArea: null,
+      // Route planning layers (SE-2.2)
+      routeStartMarker: null,
+      routeEndMarker: null,
+      preDisasterRoute: null,
+      postDisasterRoute: null,
+      routeInfo: null
     };
   }
 }

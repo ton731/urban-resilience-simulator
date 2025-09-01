@@ -4,7 +4,7 @@ import math
 from typing import List, Dict, Tuple, Any
 from dataclasses import dataclass, field
 import numpy as np
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, LineString
 from shapely.ops import unary_union
 
 
@@ -105,34 +105,31 @@ class BuildingGenerator:
             
         Returns:
             Dict[str, Building]: Dictionary of building_id -> Building objects
-        """
-        print("🏗️ Starting building generation (WS-1.5)...")
-        
+        """        
         # Create exclusion zones for roads and existing facilities
         exclusion_zones = self._create_exclusion_zones(map_data)
         
-        # Generate candidate building positions
-        candidate_positions = self._generate_candidate_positions(map_data, exclusion_zones)
-        
-        # Calculate road density map for population distribution
+        # Calculate road density map for population distribution (needed for position generation)
         road_density_map = self._calculate_road_density_map(map_data)
+        
+        # Generate candidate building positions with pre-determined building specs
+        candidate_positions = self._generate_candidate_positions(map_data, exclusion_zones, road_density_map)
         
         # Generate buildings at candidate positions
         buildings = {}
         total_population = 0
         
-        for position in candidate_positions:
-            x, y = position
+        for position_data in candidate_positions:
+            x, y, building_type, footprint_area = position_data
             
-            # Calculate local road density to influence building type and population
+            # Calculate local road density for population calculation
             density_factor = self._get_density_factor(x, y, road_density_map, map_data.boundary)
             
-            # Generate building
-            building = self._generate_building(x, y, density_factor)
+            # Generate building with pre-determined specs
+            building = self._generate_building_with_specs(x, y, building_type, footprint_area, density_factor)
             buildings[building.id] = building
             total_population += building.population
         
-        print(f"✅ Generated {len(buildings)} buildings with {total_population} total population")
         return buildings
     
     def _create_exclusion_zones(self, map_data) -> List[Polygon]:
@@ -147,15 +144,15 @@ class BuildingGenerator:
             from_node = map_data.nodes[edge.from_node]
             to_node = map_data.nodes[edge.to_node]
             
-            # Create line from road edge
-            from_point = Point(from_node.x, from_node.y)
-            to_point = Point(to_node.x, to_node.y)
+            # Create LineString representing the entire road segment
+            road_line = LineString([
+                (from_node.x, from_node.y),
+                (to_node.x, to_node.y)
+            ])
             
-            # Buffer the road line by road width + additional buffer
+            # Buffer the entire road line by road width + additional buffer
             total_buffer = (edge.width / 2) + self.road_buffer_distance
-            road_polygon = Point(from_node.x, from_node.y).buffer(total_buffer).union(
-                Point(to_node.x, to_node.y).buffer(total_buffer)
-            )
+            road_polygon = road_line.buffer(total_buffer)
             
             exclusion_zones.append(road_polygon)
         
@@ -166,13 +163,17 @@ class BuildingGenerator:
         
         return exclusion_zones
     
-    def _generate_candidate_positions(self, map_data, exclusion_zones) -> List[Tuple[float, float]]:
+    def _generate_candidate_positions(self, map_data, exclusion_zones, road_density_map) -> List[Tuple[float, float, str, float]]:
         """
-        Generate candidate positions for buildings using Poisson disk sampling
-        to ensure good distribution with minimum distances.
+        Generate candidate positions for buildings with pre-determined building specs.
+        Uses Poisson disk sampling to ensure good distribution with minimum distances.
+        
+        Returns:
+            List[Tuple[float, float, str, float]]: List of (x, y, building_type, footprint_area)
         """
         boundary = map_data.boundary
         positions = []
+        building_positions_only = []  # For distance checking
         
         # Merge all exclusion zones for efficient checking
         merged_exclusions = unary_union(exclusion_zones) if exclusion_zones else None
@@ -189,11 +190,18 @@ class BuildingGenerator:
                     candidate_x = x + random.uniform(0, grid_size)
                     candidate_y = y + random.uniform(0, grid_size)
                     
-                    # Check if position is valid
+                    # Calculate local road density for this position
+                    density_factor = self._get_density_factor(candidate_x, candidate_y, road_density_map, boundary)
+                    
+                    # Pre-determine building specs based on density
+                    building_type, footprint_area = self._select_building_specs(density_factor)
+                    
+                    # Check if position is valid with actual building size
                     if self._is_valid_building_position(
-                        candidate_x, candidate_y, positions, merged_exclusions
+                        candidate_x, candidate_y, building_positions_only, merged_exclusions, footprint_area
                     ):
-                        positions.append((candidate_x, candidate_y))
+                        positions.append((candidate_x, candidate_y, building_type, footprint_area))
+                        building_positions_only.append((candidate_x, candidate_y))
                         break  # Found valid position for this cell
         
         # Apply density-based filtering
@@ -206,17 +214,27 @@ class BuildingGenerator:
     
     def _is_valid_building_position(self, x: float, y: float, 
                                   existing_positions: List[Tuple[float, float]], 
-                                  exclusion_zones) -> bool:
+                                  exclusion_zones, footprint_area: float) -> bool:
         """
         Check if a position is valid for building placement.
-        """
-        candidate_point = Point(x, y)
+        Now considers the actual building footprint area, not just the center point.
         
-        # Check exclusion zones
-        if exclusion_zones and exclusion_zones.contains(candidate_point):
+        Args:
+            x: Building center x coordinate
+            y: Building center y coordinate
+            existing_positions: List of existing building positions
+            exclusion_zones: Merged exclusion zones polygon
+            footprint_area: Building footprint area in square meters
+        """
+        # Create building footprint polygon
+        building_polygon = self._calculate_building_footprint_polygon(x, y, footprint_area)
+        
+        # Check if building polygon overlaps with exclusion zones
+        if exclusion_zones and exclusion_zones.intersects(building_polygon):
             return False
         
         # Check minimum distance to existing buildings
+        # Use building polygon boundary for more accurate distance checking
         for ex_x, ex_y in existing_positions:
             distance = math.sqrt((x - ex_x)**2 + (y - ex_y)**2)
             if distance < self.min_building_distance:
@@ -281,6 +299,101 @@ class BuildingGenerator:
         
         key = f"{grid_x},{grid_y}"
         return road_density_map.get(key, 0.2)  # Default low density
+    
+    def _select_building_specs(self, density_factor: float) -> Tuple[str, float]:
+        """
+        Select building type and generate footprint area based on density factor.
+        
+        Args:
+            density_factor: Density factor influencing building selection
+            
+        Returns:
+            Tuple[str, float]: (building_type, footprint_area)
+        """
+        # Select building type using existing logic
+        building_type = self._select_building_type(density_factor)
+        
+        # Get building specifications
+        specs = self.building_specs[building_type]
+        
+        # Generate footprint area
+        footprint_area = random.uniform(
+            specs["footprint_range"][0], 
+            specs["footprint_range"][1]
+        )
+        
+        return building_type, footprint_area
+    
+    def _calculate_building_footprint_polygon(self, x: float, y: float, footprint_area: float) -> Polygon:
+        """
+        Calculate the building footprint as a square polygon centered at (x, y).
+        
+        Args:
+            x: Building center x coordinate
+            y: Building center y coordinate
+            footprint_area: Building footprint area in square meters
+            
+        Returns:
+            Polygon: Square polygon representing the building footprint
+        """
+        # Calculate side length for square building (assuming square footprint)
+        side_length = math.sqrt(footprint_area)
+        half_side = side_length / 2
+        
+        # Create square polygon centered at (x, y)
+        corners = [
+            (x - half_side, y - half_side),  # bottom-left
+            (x + half_side, y - half_side),  # bottom-right
+            (x + half_side, y + half_side),  # top-right
+            (x - half_side, y + half_side),  # top-left
+        ]
+        
+        return Polygon(corners)
+    
+    def _generate_building_with_specs(self, x: float, y: float, building_type: str, 
+                                     footprint_area: float, density_factor: float) -> Building:
+        """
+        Generate a building with pre-determined specifications.
+        
+        Args:
+            x: Building center x coordinate
+            y: Building center y coordinate  
+            building_type: Pre-determined building type
+            footprint_area: Pre-determined footprint area
+            density_factor: Density factor for population calculation
+        """
+        # Get building specifications
+        specs = self.building_specs[building_type]
+        
+        # Generate building physical properties
+        floors = random.randint(specs["min_floors"], specs["max_floors"])
+        floor_height = 3.0  # Average 3m per floor
+        height = floors * floor_height
+        
+        # Adjust height based on type specifications
+        height = max(specs["min_height"], min(specs["max_height"], height))
+        
+        # Calculate population based on building type and density
+        population = self._calculate_building_population(
+            building_type, floors, density_factor, specs
+        )
+        
+        # Calculate capacity (usually 1.2-1.5x current population)
+        capacity = int(population * random.uniform(1.2, 1.5))
+        
+        building = Building(
+            id=str(uuid.uuid4()),
+            x=x,
+            y=y,
+            height=height,
+            floors=floors,
+            building_type=building_type,
+            population=population,
+            capacity=capacity,
+            footprint_area=footprint_area
+        )
+        
+        return building
     
     def _generate_building(self, x: float, y: float, density_factor: float) -> Building:
         """

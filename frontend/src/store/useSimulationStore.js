@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { worldAPI } from '../api/apiClient';
+import { worldAPI, simulationAPI } from '../api/apiClient';
 
 /**
  * Zustand store for managing simulation state
@@ -45,7 +45,7 @@ const useSimulationStore = create((set, get) => ({
   
   // Layer Visibility
   layerVisibility: {
-    nodes: true,
+    nodes: false,
     mainRoads: true,
     secondaryRoads: true,
     edges: true,
@@ -69,6 +69,47 @@ const useSimulationStore = create((set, get) => ({
   
   // Statistics
   mapStats: null,
+  
+  // Disaster Simulation State (SE-2.1)
+  disasterSimulationData: null,
+  disasterIntensity: 5.0,
+  isRunningSimulation: false,
+  simulationError: null,
+  lastSimulationAt: null,
+  
+  // Disaster visualization layers
+  disasterLayerVisibility: {
+    collapsedTrees: true,
+    treeBlockages: true,
+    roadObstructions: true,
+    servicePath: false,
+    serviceArea: false
+  },
+
+  // Route Planning State (SE-2.2)
+  routePlanning: {
+    startPoint: null,
+    endPoint: null,
+    vehicleType: 'car', // pedestrian, motorcycle, car, ambulance, fire_truck
+    isSettingStartPoint: false,
+    isSettingEndPoint: false,
+    isCalculatingRoute: false,
+    routeError: null,
+    
+    // Route results
+    preDisasterRoute: null,    // Route without disaster effects
+    postDisasterRoute: null,   // Route with disaster effects
+    routeStats: null           // Route comparison statistics
+  },
+
+  // Route visualization layers
+  routeLayerVisibility: {
+    startMarker: true,
+    endMarker: true,
+    preDisasterRoute: true,
+    postDisasterRoute: true,
+    routeInfo: true
+  },
 
   // Actions
   
@@ -125,7 +166,10 @@ const useSimulationStore = create((set, get) => ({
         generationId: mapData.generation_id,
         treeStats: mapData.tree_stats || null,
         facilityStats: mapData.facility_stats || null,
-        populationStats: mapData.population_stats || null
+        populationStats: mapData.population_stats || null,
+        buildingsByType: mapData.building_stats?.by_type || null,
+        totalPopulation: mapData.population_stats?.total_population || 0,
+        populationDensity: mapData.population_stats?.population_density || 0
       };
 
       set({ 
@@ -135,6 +179,9 @@ const useSimulationStore = create((set, get) => ({
         isLoading: false,
         error: null
       });
+
+      // Clear previous route planning data when generating new world
+      get().clearRoutePoints();
 
       console.log('✅ World generation completed:', mapStats);
       return mapData;
@@ -188,7 +235,7 @@ const useSimulationStore = create((set, get) => ({
    */
   resetLayerVisibility: () => set({
     layerVisibility: {
-      nodes: true,
+      nodes: false,
       mainRoads: true,
       secondaryRoads: true,
       edges: true,
@@ -326,6 +373,360 @@ const useSimulationStore = create((set, get) => ({
     generationConfig: {
       ...state.generationConfig,
       ...buildingConfig
+    }
+  })),
+
+  // Disaster Simulation Actions (SE-2.1)
+
+  /**
+   * Set disaster intensity
+   * @param {number} intensity - Disaster intensity (1.0-10.0)
+   */
+  setDisasterIntensity: (intensity) => set({ disasterIntensity: intensity }),
+
+  /**
+   * Run disaster simulation
+   */
+  runDisasterSimulation: async () => {
+    const { mapData, disasterIntensity } = get();
+    
+    if (!mapData) {
+      set({ simulationError: '請先生成地圖才能執行災害模擬' });
+      return;
+    }
+
+    try {
+      set({ 
+        isRunningSimulation: true, 
+        simulationError: null,
+        disasterSimulationData: null 
+      });
+      
+      console.log('🔥 Starting disaster simulation with intensity:', disasterIntensity);
+      
+      const simulationConfig = {
+        world_generation_id: mapData.generation_id,
+        disaster_intensity: disasterIntensity,
+        random_seed: Math.floor(Math.random() * 1000000), // Random seed for varied results
+        include_minor_debris: false
+      };
+      
+      const simulationResult = await simulationAPI.runDisasterSimulation(simulationConfig);
+      
+      set({
+        disasterSimulationData: simulationResult,
+        lastSimulationAt: new Date(),
+        isRunningSimulation: false,
+        simulationError: null
+      });
+      
+      console.log('✅ Disaster simulation completed:', simulationResult);
+      return simulationResult;
+      
+    } catch (error) {
+      const errorMessage = error.message || 'Unknown error occurred';
+      set({
+        simulationError: errorMessage,
+        isRunningSimulation: false
+      });
+      console.error('❌ Disaster simulation failed:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Clear disaster simulation data
+   */
+  clearDisasterSimulation: () => set({
+    disasterSimulationData: null,
+    simulationError: null,
+    lastSimulationAt: null
+  }),
+
+  /**
+   * Toggle disaster layer visibility
+   * @param {string} layerName - Name of disaster layer to toggle
+   */
+  toggleDisasterLayer: (layerName) => set((state) => ({
+    disasterLayerVisibility: {
+      ...state.disasterLayerVisibility,
+      [layerName]: !state.disasterLayerVisibility[layerName]
+    }
+  })),
+
+  /**
+   * Set disaster layer visibility
+   * @param {string} layerName - Name of disaster layer
+   * @param {boolean} visible - Whether layer should be visible
+   */
+  setDisasterLayerVisibility: (layerName, visible) => set((state) => ({
+    disasterLayerVisibility: {
+      ...state.disasterLayerVisibility,
+      [layerName]: visible
+    }
+  })),
+
+  /**
+   * Get disaster simulation statistics for display
+   */
+  getDisasterStats: () => {
+    const { disasterSimulationData } = get();
+    if (!disasterSimulationData) return null;
+    
+    return {
+      '災害強度': `${disasterSimulationData.simulation_config.disaster_intensity}/10`,
+      '倒塌樹木總數': disasterSimulationData.total_trees_affected,
+      '受影響道路': disasterSimulationData.total_roads_affected,
+      '道路阻塞長度': `${disasterSimulationData.total_blocked_road_length.toFixed(1)}m`,
+      '平均阻塞率': `${disasterSimulationData.average_road_blockage_percentage.toFixed(1)}%`,
+      '高風險樹木倒塌': disasterSimulationData.trees_affected_by_level.I || 0,
+      '中風險樹木倒塌': disasterSimulationData.trees_affected_by_level.II || 0,
+      '低風險樹木倒塌': disasterSimulationData.trees_affected_by_level.III || 0
+    };
+  },
+
+  /**
+   * Clear all simulation-related errors
+   */
+  clearSimulationError: () => set({ simulationError: null }),
+
+  // Route Planning Actions (SE-2.2)
+
+  /**
+   * Set route planning start point
+   * @param {Array} point - [longitude, latitude] coordinates
+   */
+  setRouteStartPoint: (point) => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      startPoint: point,
+      isSettingStartPoint: false
+    }
+  })),
+
+  /**
+   * Set route planning end point
+   * @param {Array} point - [longitude, latitude] coordinates  
+   */
+  setRouteEndPoint: (point) => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      endPoint: point,
+      isSettingEndPoint: false
+    }
+  })),
+
+  /**
+   * Enable start point selection mode
+   */
+  enableStartPointSelection: () => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      isSettingStartPoint: true,
+      isSettingEndPoint: false
+    }
+  })),
+
+  /**
+   * Enable end point selection mode
+   */
+  enableEndPointSelection: () => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      isSettingStartPoint: false,
+      isSettingEndPoint: true
+    }
+  })),
+
+  /**
+   * Clear route planning waypoints
+   */
+  clearRoutePoints: () => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      startPoint: null,
+      endPoint: null,
+      isSettingStartPoint: false,
+      isSettingEndPoint: false,
+      preDisasterRoute: null,
+      postDisasterRoute: null,
+      alternativeRoutes: [],
+      routeStats: null,
+      routeError: null
+    }
+  })),
+
+  /**
+   * Set vehicle type for route planning
+   * @param {string} vehicleType - Vehicle type (pedestrian, motorcycle, car, ambulance, fire_truck)
+   */
+  setRouteVehicleType: (vehicleType) => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      vehicleType
+    }
+  })),
+
+
+
+  /**
+   * Calculate route between start and end points
+   */
+  calculateRoute: async () => {
+    const { mapData, disasterSimulationData, routePlanning } = get();
+    
+    if (!mapData) {
+      set((state) => ({
+        routePlanning: {
+          ...state.routePlanning,
+          routeError: '請先生成地圖才能計算路線'
+        }
+      }));
+      return;
+    }
+
+    if (!routePlanning.startPoint || !routePlanning.endPoint) {
+      set((state) => ({
+        routePlanning: {
+          ...state.routePlanning,
+          routeError: '請設定起點和終點'
+        }
+      }));
+      return;
+    }
+
+    try {
+      set((state) => ({
+        routePlanning: {
+          ...state.routePlanning,
+          isCalculatingRoute: true,
+          routeError: null,
+          preDisasterRoute: null,
+          postDisasterRoute: null,
+          alternativeRoutes: [],
+          routeStats: null
+        }
+      }));
+
+      console.log('🚗 Calculating route from', routePlanning.startPoint, 'to', routePlanning.endPoint);
+
+      const pathRequest = {
+        world_generation_id: mapData.generation_id,
+        start_point: routePlanning.startPoint,
+        end_point: routePlanning.endPoint,
+        vehicle_type: routePlanning.vehicleType,
+        simulation_id: null // Pre-disaster route first
+      };
+
+      // Calculate pre-disaster route
+      const preDisasterRoute = await simulationAPI.findPath(pathRequest);
+      console.log('✅ Pre-disaster route calculated:', preDisasterRoute);
+
+      let postDisasterRoute = null;
+      let routeStats = null;
+
+      // Calculate post-disaster route if disaster simulation exists
+      if (disasterSimulationData) {
+        const postDisasterRequest = {
+          ...pathRequest,
+          simulation_id: disasterSimulationData.simulation_id
+        };
+
+        postDisasterRoute = await simulationAPI.findPath(postDisasterRequest);
+        console.log('✅ Post-disaster route calculated:', postDisasterRoute);
+
+        // Calculate route comparison statistics
+        if (preDisasterRoute.success && postDisasterRoute.success) {
+          routeStats = {
+            distanceIncrease: postDisasterRoute.total_distance - preDisasterRoute.total_distance,
+            timeIncrease: postDisasterRoute.estimated_travel_time - preDisasterRoute.estimated_travel_time,
+            distanceIncreasePercent: ((postDisasterRoute.total_distance - preDisasterRoute.total_distance) / preDisasterRoute.total_distance) * 100,
+            timeIncreasePercent: ((postDisasterRoute.estimated_travel_time - preDisasterRoute.estimated_travel_time) / preDisasterRoute.estimated_travel_time) * 100,
+            blockedRoadsCount: postDisasterRoute.blocked_roads ? postDisasterRoute.blocked_roads.length : 0
+          };
+        }
+      }
+
+
+
+      set((state) => ({
+        routePlanning: {
+          ...state.routePlanning,
+          preDisasterRoute,
+          postDisasterRoute,
+          routeStats,
+          isCalculatingRoute: false,
+          routeError: null
+        }
+      }));
+
+      return { preDisasterRoute, postDisasterRoute, routeStats };
+
+    } catch (error) {
+      const errorMessage = error.message || 'Route calculation failed';
+      set((state) => ({
+        routePlanning: {
+          ...state.routePlanning,
+          routeError: errorMessage,
+          isCalculatingRoute: false
+        }
+      }));
+      console.error('❌ Route calculation failed:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Toggle route layer visibility
+   * @param {string} layerName - Name of route layer to toggle
+   */
+  toggleRouteLayer: (layerName) => set((state) => ({
+    routeLayerVisibility: {
+      ...state.routeLayerVisibility,
+      [layerName]: !state.routeLayerVisibility[layerName]
+    }
+  })),
+
+  /**
+   * Set route layer visibility
+   * @param {string} layerName - Name of route layer
+   * @param {boolean} visible - Whether layer should be visible
+   */
+  setRouteLayerVisibility: (layerName, visible) => set((state) => ({
+    routeLayerVisibility: {
+      ...state.routeLayerVisibility,
+      [layerName]: visible
+    }
+  })),
+
+
+
+  /**
+   * Get route planning statistics for display
+   */
+  getRouteStats: () => {
+    const { routePlanning } = get();
+    
+    if (!routePlanning.routeStats) return null;
+    
+    const stats = routePlanning.routeStats;
+    
+    return {
+      '距離變化': `${stats.distanceIncrease > 0 ? '+' : ''}${stats.distanceIncrease.toFixed(1)}m (${stats.distanceIncreasePercent > 0 ? '+' : ''}${stats.distanceIncreasePercent.toFixed(1)}%)`,
+      '時間變化': `${stats.timeIncrease > 0 ? '+' : ''}${stats.timeIncrease.toFixed(1)}s (${stats.timeIncreasePercent > 0 ? '+' : ''}${stats.timeIncreasePercent.toFixed(1)}%)`,
+      '受阻道路數': `${stats.blockedRoadsCount}條`,
+      '車輛類型': routePlanning.vehicleType,
+      '最大旅行時間': `${routePlanning.maxTravelTime}秒`
+    };
+  },
+
+  /**
+   * Clear route planning error
+   */
+  clearRouteError: () => set((state) => ({
+    routePlanning: {
+      ...state.routePlanning,
+      routeError: null
     }
   }))
 }));
