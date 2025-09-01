@@ -276,6 +276,207 @@ class DisasterSimulator:
         
         return road_obstructions
     
+    def _calculate_tree_road_blockage_simple(
+        self,
+        collapse_event: TreeCollapseEvent,
+        road_data: Dict[str, Any],
+        nodes_data: Dict[str, Any]
+    ) -> Tuple[float, float]:
+        """
+        使用簡化三角學方法計算樹木佔用的道路寬度。
+        
+        Args:
+            collapse_event: 樹木倒塌事件
+            road_data: 道路資料
+            nodes_data: 節點資料
+            
+        Returns:
+            (佔用的道路寬度, 阻塞率%)
+        """
+        # 獲取樹木和道路資訊
+        tree_x, tree_y = collapse_event.location
+        tree_height = collapse_event.tree_height
+        tree_angle = math.radians(collapse_event.collapse_angle)
+        road_width = road_data.get('width', 6.0)
+        
+        # 獲取道路節點座標
+        from_node_id = road_data.get('from_node')
+        to_node_id = road_data.get('to_node')
+        
+        if not from_node_id or not to_node_id:
+            return 0.0, 0.0
+            
+        from_node = nodes_data.get(from_node_id)
+        to_node = nodes_data.get(to_node_id)
+        
+        if not from_node or not to_node:
+            return 0.0, 0.0
+        
+        # 計算道路方向角度
+        road_dx = to_node['x'] - from_node['x']
+        road_dy = to_node['y'] - from_node['y']
+        road_angle = math.atan2(road_dy, road_dx)
+        
+        print(f"🔺 三角學計算樹木道路阻塞:")
+        print(f"  樹位置: ({tree_x:.1f}, {tree_y:.1f})")
+        print(f"  樹高度: {tree_height:.1f}m")
+        print(f"  樹倒塌角度: {math.degrees(tree_angle):.1f}°")
+        print(f"  道路角度: {math.degrees(road_angle):.1f}°")
+        print(f"  道路寬度: {road_width:.1f}m")
+        
+        # 檢查樹是否與道路相交
+        tree_end_x = tree_x + tree_height * math.cos(tree_angle)
+        tree_end_y = tree_y + tree_height * math.sin(tree_angle)
+        
+        # 預先檢查：計算樹到道路的距離，判斷是否可能相交
+        tree_to_road_distance = self._calculate_point_to_line_distance(
+            tree_x, tree_y, from_node, to_node
+        )
+        
+        # 如果樹距離道路太遠，樹倒下後也無法觸及道路
+        road_half_width = road_width / 2
+        if tree_to_road_distance > (tree_height + road_half_width):
+            print(f"  樹木距離道路太遠，無法相交（距離: {tree_to_road_distance:.1f}m > {tree_height + road_half_width:.1f}m）")
+            return 0.0, 0.0
+        
+        # 更精確的相交檢查
+        if not self._line_intersects_road(
+            tree_x, tree_y, tree_end_x, tree_end_y,
+            from_node, to_node, road_width
+        ):
+            print("  樹木線段未與道路相交")
+            return 0.0, 0.0
+        
+        # 計算樹線與道路垂直方向的夾角
+        angle_diff = abs(tree_angle - road_angle)
+        # 確保角度在 0-π/2 範圍內
+        if angle_diff > math.pi/2:
+            angle_diff = math.pi - angle_diff
+        if angle_diff > math.pi/2:
+            angle_diff = math.pi/2 - (angle_diff - math.pi/2)
+            
+        print(f"  樹與道路夾角: {math.degrees(angle_diff):.1f}°")
+        print(f"  樹到道路中心線距離: {tree_to_road_distance:.2f}m")
+        
+        # 計算樹總長度在道路垂直方向的投影
+        perpendicular_road_angle = road_angle + math.pi/2  # 道路垂直方向
+        tree_to_perpendicular_angle = abs(tree_angle - perpendicular_road_angle)
+        
+        # 標準化角度到 [0, π/2]
+        while tree_to_perpendicular_angle > math.pi:
+            tree_to_perpendicular_angle -= math.pi
+        if tree_to_perpendicular_angle > math.pi/2:
+            tree_to_perpendicular_angle = math.pi - tree_to_perpendicular_angle
+            
+        print(f"  樹與道路垂直方向夾角: {math.degrees(tree_to_perpendicular_angle):.1f}°")
+        
+        # 樹總長度在道路垂直方向的投影
+        tree_projection_length = tree_height * abs(math.cos(tree_to_perpendicular_angle))
+        print(f"  樹在垂直方向投影長度: {tree_projection_length:.2f}m")
+        
+        # 計算樹到道路邊緣的距離
+        # 如果樹在道路外側，需要減去樹到道路邊緣的距離
+        road_half_width = road_width / 2
+        distance_to_road_edge = max(0, tree_to_road_distance - road_half_width)
+        
+        print(f"  道路半寬: {road_half_width:.2f}m")
+        print(f"  樹到道路邊緣距離: {distance_to_road_edge:.2f}m")
+        
+        # 計算實際佔用的道路寬度
+        # 樹投影長度 - 樹到道路邊緣距離 = 實際佔用寬度
+        occupied_width = max(0, tree_projection_length - distance_to_road_edge)
+        
+        # 確保不超過道路寬度（物理限制）
+        occupied_width = min(occupied_width, road_width)
+        
+        print(f"  佔用道路寬度: {occupied_width:.2f}m")
+        
+        # 計算阻塞率
+        blockage_percentage = min(100.0, (occupied_width / road_width) * 100) if road_width > 0 else 100.0
+        
+        print(f"  阻塞率: {blockage_percentage:.1f}%")
+        
+        return occupied_width, blockage_percentage
+    
+    def _line_intersects_road(
+        self,
+        line_x1: float, line_y1: float, line_x2: float, line_y2: float,
+        from_node: Dict[str, Any], to_node: Dict[str, Any], road_width: float
+    ) -> bool:
+        """
+        檢查線段是否與道路矩形相交
+        """
+        # 創建道路矩形的四個頂點
+        road_dx = to_node['x'] - from_node['x']
+        road_dy = to_node['y'] - from_node['y']
+        road_length = math.sqrt(road_dx*road_dx + road_dy*road_dy)
+        
+        if road_length == 0:
+            return False
+            
+        # 標準化道路方向向量
+        road_dx_norm = road_dx / road_length
+        road_dy_norm = road_dy / road_length
+        
+        # 垂直向量
+        perp_x = -road_dy_norm * (road_width / 2)
+        perp_y = road_dx_norm * (road_width / 2)
+        
+        # 道路矩形的四個頂點
+        road_corners = [
+            (from_node['x'] + perp_x, from_node['y'] + perp_y),
+            (from_node['x'] - perp_x, from_node['y'] - perp_y),
+            (to_node['x'] - perp_x, to_node['y'] - perp_y),
+            (to_node['x'] + perp_x, to_node['y'] + perp_y)
+        ]
+        
+        # 簡化檢查：看樹線的起點或終點是否在道路矩形內，或者線段是否穿過道路
+        from shapely.geometry import LineString, Polygon
+        tree_line = LineString([(line_x1, line_y1), (line_x2, line_y2)])
+        road_polygon = Polygon(road_corners)
+        
+        return tree_line.intersects(road_polygon)
+    
+    def _calculate_point_to_line_distance(
+        self,
+        point_x: float, point_y: float,
+        from_node: Dict[str, Any], to_node: Dict[str, Any]
+    ) -> float:
+        """
+        計算點到線段的垂直距離（點到直線的最短距離）
+        
+        Args:
+            point_x: 點的 X 座標
+            point_y: 點的 Y 座標  
+            from_node: 線段起點
+            to_node: 線段終點
+            
+        Returns:
+            點到線段的垂直距離（米）
+        """
+        # 線段的起點和終點
+        x1, y1 = from_node['x'], from_node['y']
+        x2, y2 = to_node['x'], to_node['y']
+        
+        # 計算線段的長度
+        line_length_squared = (x2 - x1) ** 2 + (y2 - y1) ** 2
+        
+        if line_length_squared == 0:
+            # 線段長度為0（起點和終點相同）
+            return math.sqrt((point_x - x1) ** 2 + (point_y - y1) ** 2)
+        
+        # 使用點到直線距離公式：|ax + by + c| / sqrt(a² + b²)
+        # 直線方程：(y2-y1)x - (x2-x1)y + (x2-x1)y1 - (y2-y1)x1 = 0
+        # 即：ax + by + c = 0，其中：
+        a = y2 - y1
+        b = x1 - x2  
+        c = (x2 - x1) * y1 - (y2 - y1) * x1
+        
+        # 點到直線的垂直距離
+        distance = abs(a * point_x + b * point_y + c) / math.sqrt(a * a + b * b)
+        
+        return distance
+
     def _calculate_road_intersection(
         self,
         collapse_event: TreeCollapseEvent,
@@ -286,13 +487,11 @@ class DisasterSimulator:
     ) -> RoadObstruction:
         """
         Calculate the intersection between a fallen tree and a road segment.
-        
-        Implements SE-2.2 requirement for precise blockage polygon calculation
-        and remaining passable width computation.
+        使用簡化的三角學方法計算阻塞率。
         
         Args:
             collapse_event: The tree collapse event
-            tree_polygon: Shapely polygon of the fallen tree
+            tree_polygon: Shapely polygon of the fallen tree (unused in new method)
             road_id: ID of the road segment  
             road_data: Road segment data
             nodes_data: Node coordinates for road geometry
@@ -300,72 +499,54 @@ class DisasterSimulator:
         Returns:
             RoadObstruction object if intersection exists, None otherwise
         """
-        # Get node coordinates for road segment
-        from_node_id = road_data.get('from_node')
-        to_node_id = road_data.get('to_node')
-        road_width = road_data.get('width', 6.0)
+        print(f"🚧 計算道路 {road_id[:8]} 的阻塞情況")
         
-        if not from_node_id or not to_node_id:
-            return None
-            
-        from_node_data = nodes_data.get(from_node_id)
-        to_node_data = nodes_data.get(to_node_id)
-        
-        if not from_node_data or not to_node_data:
-            return None
-        
-        # Create accurate road polygon from node coordinates and width
-        road_polygon = self._create_road_polygon(
-            from_node_data, to_node_data, road_width
+        # 使用新的三角學方法計算佔用寬度和阻塞率
+        occupied_width, blocked_percentage = self._calculate_tree_road_blockage_simple(
+            collapse_event, road_data, nodes_data
         )
         
-        if road_polygon and tree_polygon.intersects(road_polygon):
-            # Calculate precise intersection geometry
-            intersection = tree_polygon.intersection(road_polygon)
-            
-            if intersection.is_empty:
-                return None
-            
-            # Calculate blocked percentage and remaining width
-            intersection_area = intersection.area
-            road_area = road_polygon.area
-            
-            blocked_percentage = min(100.0, (intersection_area / road_area) * 100)
-            
-            # Calculate directional blockage for bidirectional roads
-            directional_blockage = self._calculate_directional_blockage(
-                road_polygon, intersection, road_data, road_width
-            )
-            
-            # Overall remaining width is the minimum of both directions
-            overall_remaining_width = min(directional_blockage.values())
-            
-            # Determine which directions are affected (below minimum width threshold)
-            min_width_threshold = 2.0  # Minimum width for any vehicle
-            affected_directions = [
-                direction for direction, width in directional_blockage.items() 
-                if width < min_width_threshold
-            ]
-            
-            # Get intersection polygon coordinates
-            obstruction_coords = self._extract_polygon_coordinates(intersection)
-            
-            print(f"  🚧 创建道路阻塞对象:")
-            print(f"    整体剩余宽度: {overall_remaining_width:.2f}m")
-            print(f"    受影响方向: {affected_directions}")
-            
-            return RoadObstruction(
-                obstruction_id=f"obstruction_{uuid.uuid4().hex[:8]}",
-                road_edge_id=road_id,
-                obstruction_polygon=obstruction_coords,
-                remaining_width=max(0.0, overall_remaining_width),
-                blocked_percentage=blocked_percentage,
-                caused_by_event=collapse_event.event_id,
-                directional_blockage=directional_blockage,
-                affected_directions=affected_directions
-            )
+        # 如果沒有阻塞，返回 None
+        if occupied_width <= 0 or blocked_percentage <= 0:
+            return None
         
-        return None
+        road_width = road_data.get('width', 6.0)
+        remaining_width = max(0.0, road_width - occupied_width)
+        
+        # 簡化的方向性阻塞計算
+        # 假設阻塞影響所有方向
+        directional_blockage = {
+            "forward": remaining_width / 2,  # 前進方向剩餘寬度
+            "backward": remaining_width / 2  # 後退方向剩餘寬度
+        }
+        
+        # 確定受影響的方向
+        min_width_threshold = 2.0
+        affected_directions = [
+            direction for direction, width in directional_blockage.items() 
+            if width < min_width_threshold
+        ]
+        
+        # 簡化的阻塞多邊形（使用樹的阻塞多邊形）
+        obstruction_coords = collapse_event.blockage_polygon
+        
+        print(f"  ✅ 創建道路阻塞對象:")
+        print(f"    原始道路寬度: {road_width:.2f}m")
+        print(f"    樹木佔用寬度: {occupied_width:.2f}m")
+        print(f"    剩餘寬度: {remaining_width:.2f}m")
+        print(f"    阻塞率: {blocked_percentage:.1f}%")
+        print(f"    受影響方向: {affected_directions}")
+        
+        return RoadObstruction(
+            obstruction_id=f"obstruction_{uuid.uuid4().hex[:8]}",
+            road_edge_id=road_id,
+            obstruction_polygon=obstruction_coords,
+            remaining_width=remaining_width,
+            blocked_percentage=blocked_percentage,
+            caused_by_event=collapse_event.event_id,
+            directional_blockage=directional_blockage,
+            affected_directions=affected_directions
+        )
     
     def _create_road_polygon(
         self, 

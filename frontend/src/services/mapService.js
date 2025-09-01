@@ -1413,7 +1413,7 @@ class MapService {
           <strong>道路ID:</strong> ${obstruction.road_edge_id.substring(0, 8)}<br/>
           <strong>剩餘寬度:</strong> ${obstruction.remaining_width.toFixed(1)}m<br/>
           <strong>阻塞率:</strong> ${obstruction.blocked_percentage.toFixed(1)}%<br/>
-          <strong>造成事件:</strong> ${obstruction.caused_by_event.substring(0, 8)}<br/>
+          <strong>造成事件:</strong> ${obstruction.caused_by_event}<br/>
           ${directionalInfo}
           <hr style="margin: 8px 0;">
           <small style="color: #666;">
