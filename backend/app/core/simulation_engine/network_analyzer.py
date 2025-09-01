@@ -152,6 +152,9 @@ class NetworkAnalyzer:
                 estimated_travel_time=0.0,
                 vehicle_type=request.vehicle_type,
                 blocked_roads=[],
+                is_partial_path=False,
+                partial_path_reason="no_road_network",
+                distance_to_destination=None
             )
 
         # Try road-based pathfinding first
@@ -230,6 +233,9 @@ class NetworkAnalyzer:
                         estimated_travel_time=partial_time,
                         vehicle_type=request.vehicle_type,
                         blocked_roads=blocked_roads,
+                        is_partial_path=True,
+                        partial_path_reason=partial_path_result.get("reason", "unknown"),
+                        distance_to_destination=partial_path_result.get("distance_to_destination")
                     )
 
                     # Print partial path summary
@@ -262,6 +268,9 @@ class NetworkAnalyzer:
                         estimated_travel_time=0.0,
                         vehicle_type=request.vehicle_type,
                         blocked_roads=[],
+                        is_partial_path=False,
+                        partial_path_reason="no_reachable_path",
+                        distance_to_destination=None
                     )
 
             # Convert path to coordinates and calculate metrics
@@ -345,6 +354,7 @@ class NetworkAnalyzer:
             return result
 
         except Exception as e:
+            print(f"路徑規劃發生錯誤: {e}")
             return PathfindingResult(
                 success=False,
                 path_coordinates=[],
@@ -353,6 +363,9 @@ class NetworkAnalyzer:
                 estimated_travel_time=0.0,
                 vehicle_type=request.vehicle_type,
                 blocked_roads=[],
+                is_partial_path=False,
+                partial_path_reason="pathfinding_error",
+                distance_to_destination=None
             )
 
     def _find_nearest_node(self, point: Tuple[float, float]) -> Optional[str]:

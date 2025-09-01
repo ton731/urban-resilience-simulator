@@ -1597,8 +1597,9 @@ class MapService {
     const metersToLat = 1 / 111000;
     const metersToLng = 1 / 111000;
 
-    // Add pre-disaster route if available
-    if (routeData.preDisasterRoute && routeData.preDisasterRoute.success) {
+    // Add pre-disaster route if available (including partial paths)
+    if (routeData.preDisasterRoute && (routeData.preDisasterRoute.success || routeData.preDisasterRoute.is_partial_path)) {
+      console.log('顯示災前路徑（包含部分路徑）');
       this.addRouteToMap(
         routeData.preDisasterRoute,
         'preDisaster',
@@ -1606,13 +1607,25 @@ class MapService {
       );
     }
 
-    // Add post-disaster route if available  
-    if (routeData.postDisasterRoute && routeData.postDisasterRoute.success) {
-      this.addRouteToMap(
-        routeData.postDisasterRoute,
-        'postDisaster',
-        centerX, centerY, metersToLat, metersToLng
-      );
+    // Add post-disaster route if available (including partial paths)
+    if (routeData.postDisasterRoute) {
+      console.log('災後路徑數據:', {
+        success: routeData.postDisasterRoute.success,
+        is_partial_path: routeData.postDisasterRoute.is_partial_path,
+        path_coordinates_length: routeData.postDisasterRoute.path_coordinates?.length || 0,
+        partial_path_reason: routeData.postDisasterRoute.partial_path_reason
+      });
+      
+      if (routeData.postDisasterRoute.success || routeData.postDisasterRoute.is_partial_path) {
+        console.log('顯示災後路徑（包含部分路徑）');
+        this.addRouteToMap(
+          routeData.postDisasterRoute,
+          'postDisaster',
+          centerX, centerY, metersToLat, metersToLng
+        );
+      } else {
+        console.log('災後路徑不顯示：', routeData.postDisasterRoute.partial_path_reason);
+      }
     }
 
 
@@ -1670,12 +1683,22 @@ class MapService {
 
     const style = routeStyles[routeType];
     
+    // Modify style for partial paths
+    let finalStyle = { ...style };
+    if (route.is_partial_path) {
+      // Use dashed line for partial paths and modify the name
+      finalStyle.dashArray = '15, 10';
+      finalStyle.name = `${style.name} (部分路徑)`;
+      // Make it slightly more transparent to indicate incompleteness
+      finalStyle.opacity = Math.max(0.5, finalStyle.opacity - 0.2);
+    }
+    
     // Create route polyline
     const routeLine = L.polyline(routeCoords, {
-      color: style.color,
-      weight: style.weight,
-      opacity: style.opacity,
-      dashArray: style.dashArray,
+      color: finalStyle.color,
+      weight: finalStyle.weight,
+      opacity: finalStyle.opacity,
+      dashArray: finalStyle.dashArray,
       lineCap: 'round',
       lineJoin: 'round'
     });
@@ -1683,12 +1706,15 @@ class MapService {
     // Add route information popup
     const popupContent = `
       <div style="font-family: monospace; min-width: 200px;">
-        <strong>🛣️ ${style.name}</strong><br/>
+        <strong>🛣️ ${finalStyle.name}</strong><br/>
         <hr style="margin: 8px 0;">
         ${route.is_partial_path ? 
           `<div style="background-color: #fef3c7; padding: 4px; border-radius: 4px; margin-bottom: 8px;">
             <strong style="color: #92400e;">⚠️ 部分路徑</strong><br/>
-            <small style="color: #92400e;">${route.partial_path_reason || '無法到達完整目的地'}</small>
+            <small style="color: #92400e;">${route.partial_path_reason || '無法到達完整目的地'}</small><br/>
+            ${route.distance_to_destination ? 
+              `<small style="color: #92400e;">距離目的地還有: ${route.distance_to_destination.toFixed(1)}m</small>` : ''
+            }
           </div>` : ''
         }
         <strong>總距離:</strong> ${route.total_distance.toFixed(1)}m<br/>
@@ -1717,7 +1743,34 @@ class MapService {
     }
 
     // Add direction arrows for better visualization
-    this.addRouteDirectionArrows(routeCoords, style.color, routeType);
+    this.addRouteDirectionArrows(routeCoords, finalStyle.color, routeType);
+    
+    // Add special marker for partial path endpoints
+    if (route.is_partial_path && routeCoords.length > 0) {
+      const endPoint = routeCoords[routeCoords.length - 1];
+      const endMarker = L.circleMarker(endPoint, {
+        color: '#f59e0b', // Orange color
+        fillColor: '#fbbf24',
+        fillOpacity: 0.8,
+        radius: 8,
+        weight: 3
+      }).bindPopup(`
+        <div style="font-family: monospace; min-width: 150px;">
+          <strong>🚧 最遠可達點</strong><br/>
+          <small>由於災害阻塞，無法繼續前進</small><br/>
+          ${route.distance_to_destination ? 
+            `<small>距離原目的地: ${route.distance_to_destination.toFixed(1)}m</small>` : ''
+          }
+        </div>
+      `);
+      
+      // Add to appropriate layer
+      if (routeType === 'preDisaster') {
+        this.layers.preDisasterRoute.addLayer(endMarker);
+      } else if (routeType === 'postDisaster') {
+        this.layers.postDisasterRoute.addLayer(endMarker);
+      }
+    }
   }
 
   /**
@@ -1882,14 +1935,16 @@ class MapService {
 
     const stats = {};
     
-    if (this.currentRouteData.preDisasterRoute && this.currentRouteData.preDisasterRoute.success) {
+    if (this.currentRouteData.preDisasterRoute && (this.currentRouteData.preDisasterRoute.success || this.currentRouteData.preDisasterRoute.is_partial_path)) {
       stats.preDisasterDistance = this.currentRouteData.preDisasterRoute.total_distance;
       stats.preDisasterTime = this.currentRouteData.preDisasterRoute.estimated_travel_time;
     }
 
-    if (this.currentRouteData.postDisasterRoute && this.currentRouteData.postDisasterRoute.success) {
+    if (this.currentRouteData.postDisasterRoute && (this.currentRouteData.postDisasterRoute.success || this.currentRouteData.postDisasterRoute.is_partial_path)) {
       stats.postDisasterDistance = this.currentRouteData.postDisasterRoute.total_distance;
       stats.postDisasterTime = this.currentRouteData.postDisasterRoute.estimated_travel_time;
+      stats.isPartialPath = this.currentRouteData.postDisasterRoute.is_partial_path;
+      stats.distanceToDestination = this.currentRouteData.postDisasterRoute.distance_to_destination;
     }
 
     if (this.currentRouteData.routeStats) {

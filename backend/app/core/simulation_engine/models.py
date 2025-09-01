@@ -101,6 +101,20 @@ class PathfindingResult(BaseModel):
         default=None,
         description="Number of alternative routes found (if applicable)"
     )
+    
+    # Partial path support
+    is_partial_path: bool = Field(
+        default=False,
+        description="True if this is a partial path (could not reach destination)"
+    )
+    partial_path_reason: Optional[str] = Field(
+        default=None,
+        description="Reason why only partial path was found"
+    )
+    distance_to_destination: Optional[float] = Field(
+        default=None,
+        description="Distance from end of partial path to intended destination (meters)"
+    )
 
 
 class DisasterSimulationConfig(BaseModel):
