@@ -220,21 +220,10 @@ const MapContainer = () => {
       {mapData && (
         <div className="absolute bottom-4 left-4 bg-white p-3 rounded-lg shadow-md text-sm">
           <h4 className="font-medium mb-2">圖例 Legend</h4>
-          <p className="text-xs text-gray-600 mb-2">
-            道路已統一為灰色，單向道路較深色，雙向道路較淺色
-          </p>
           <div className="space-y-1">
             <div className="flex items-center space-x-2">
-              <div className="w-6 h-3 bg-gray-400 border border-gray-600"></div>
-              <span>道路 Roads (雙向)</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-6 h-3 bg-gray-600 border border-gray-600" style={{ opacity: 0.8, borderStyle: 'dashed' }}></div>
-              <span>道路 Roads (單向)</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 bg-orange-400 rounded-full"></div>
-              <span>交叉路口 Intersections</span>
+              <div className="w-6 h-3 bg-black border border-black"></div>
+              <span>道路 Roads</span>
             </div>
             {mapData && mapData.facility_count > 0 && (
               <>

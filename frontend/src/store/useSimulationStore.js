@@ -45,7 +45,7 @@ const useSimulationStore = create((set, get) => ({
   
   // Layer Visibility
   layerVisibility: {
-    nodes: true,
+    nodes: false,
     mainRoads: true,
     secondaryRoads: true,
     edges: true,
@@ -235,7 +235,7 @@ const useSimulationStore = create((set, get) => ({
    */
   resetLayerVisibility: () => set({
     layerVisibility: {
-      nodes: true,
+      nodes: false,
       mainRoads: true,
       secondaryRoads: true,
       edges: true,

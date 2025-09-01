@@ -157,9 +157,6 @@ class MapService {
       convertedNodes[nodeId] = { ...node, lat, lng };
     });
 
-    // Add nodes to map
-    this.addNodes(convertedNodes);
-    
     // Add edges (roads) to map
     this.addEdges(edges, convertedNodes);
     
