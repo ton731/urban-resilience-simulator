@@ -229,32 +229,32 @@ class MapService {
       // Create road polygon with actual width
       const roadPolygon = this._createRoadPolygon(fromNode, toNode, edge);
       
-      // Style based on road type and direction - All roads are now gray
+      // Style for realistic black road surface
       const roadOptions = {
-        color: '#666666', // Dark gray borders for all roads
-        fillColor: '#cccccc', // Light gray fill for bidirectional roads
-        fillOpacity: 0.7,
-        weight: 2,
-        opacity: 0.9
+        color: '#333333', // Dark border for all roads
+        fillColor: '#2c2c2c', // Black road surface like real asphalt
+        fillOpacity: 0.9,
+        weight: 1,
+        opacity: 0.8
       };
-
-      // Different styling for one-way roads - darker gray
-      if (!edge.is_bidirectional) {
-        roadOptions.fillColor = '#999999'; // Darker gray for one-way roads
-        roadOptions.fillOpacity = 0.8;
-        // Add arrow pattern for one-way roads
-        roadOptions.dashArray = '10, 5';
-      }
 
       const road = L.polygon(roadPolygon, roadOptions);
       
-      // Add lane dividers and direction indicators for ALL roads
+      // First add the road polygon to the layer
+      if (isMainRoad) {
+        this.layers.mainRoads.addLayer(road);
+      } else {
+        this.layers.secondaryRoads.addLayer(road);
+      }
+      this.layers.edges.addLayer(road);
       
-      // 1. Add center divider line for bidirectional roads
+      // THEN add lane dividers and direction indicators ON TOP of roads
+      
+      // 1. Add center divider line for bidirectional roads (AFTER road polygon)
       if (edge.is_bidirectional) {
         const centerLine = this._createCenterDivider(fromNode, toNode);
         
-        // Add to appropriate layer
+        // Add to appropriate layer AFTER the road
         if (isMainRoad) {
           this.layers.mainRoads.addLayer(centerLine);
         } else {
@@ -263,7 +263,7 @@ class MapService {
         this.layers.edges.addLayer(centerLine);
       }
       
-      // 2. Add road surface arrows for ALL roads
+      // 2. Add road surface arrows for ALL roads (AFTER road polygon and center line)
       const primaryDirection = edge.primary_direction || this._determineDirection(fromNode, toNode);
       
       const roadArrows = this._createRoadSurfaceArrows(
@@ -273,7 +273,7 @@ class MapService {
         primaryDirection
       );
       
-      // Add arrows to the same layer
+      // Add arrows to the same layer AFTER everything else
       roadArrows.forEach(arrow => {
         if (isMainRoad) {
           this.layers.mainRoads.addLayer(arrow);
@@ -325,15 +325,6 @@ class MapService {
           </small>
         </div>
       `);
-
-      // Add to appropriate layer
-      if (isMainRoad) {
-        this.layers.mainRoads.addLayer(road);
-      } else {
-        this.layers.secondaryRoads.addLayer(road);
-      }
-      
-      this.layers.edges.addLayer(road);
     });
   }
 
@@ -380,10 +371,13 @@ class MapService {
     const centerLine = L.polyline(
       [[fromNode.lat, fromNode.lng], [toNode.lat, toNode.lng]], 
       {
-        color: '#FFD700',     // Golden yellow center line for better visibility  
-        weight: 3,            // Thicker line
-        opacity: 1.0,         // Full opacity
-        dashArray: '8, 6',    // Dashed line pattern (shorter dashes)
+        color: '#FFFFFF',     // Bright white center line
+        weight: 3,            // Thicker line for better visibility
+        opacity: 1.0,         // Full opacity - no transparency issues
+        dashArray: '12, 8',   // Clear dashed pattern
+        interactive: false,   // Don't interfere with road clicks
+        bubblingMouseEvents: false, // Let mouse events pass through
+        pane: 'overlayPane'   // Ensure it's on top layer
       }
     );
     
@@ -458,8 +452,8 @@ class MapService {
    */
   _createBidirectionalArrows(fromNode, toNode, unitX, unitY, perpX, perpY, roadWidth, isMainRoad) {
     const arrows = [];
-    const arrowSpacing = isMainRoad ? 0.0003 : 0.0004; // Spacing between arrows in degrees
-    const sideOffset = roadWidth * 0.25 / 111000; // Quarter road width offset
+    const arrowSpacing = isMainRoad ? 0.0008 : 0.001; // Increased spacing - less dense arrows
+    const sideOffset = roadWidth * 0.3 / 111000; // Slightly more offset from center
     
     // Calculate number of arrows based on road length
     const dx = toNode.lng - fromNode.lng;
@@ -514,8 +508,8 @@ class MapService {
    * Create a single arrow polygon on the road surface
    */
   _createSingleArrow(lat, lng, dirX, dirY, isMainRoad, isBidirectional) {
-    const arrowSize = isMainRoad ? 0.00008 : 0.00006; // Arrow size in degrees
-    const arrowLength = arrowSize * 1.5;
+    const arrowSize = isMainRoad ? 0.00003 : 0.000025; // Much smaller arrows - appropriate for road width
+    const arrowLength = arrowSize * 2;
     
     // Arrow head point
     const headLat = lat + dirY * arrowLength;
@@ -525,25 +519,28 @@ class MapService {
     const perpX = -dirY;
     const perpY = dirX;
     
-    const tailLeftLat = lat - perpY * arrowSize * 0.5;
-    const tailLeftLng = lng - perpX * arrowSize * 0.5;
+    const tailLeftLat = lat - perpY * arrowSize * 0.6;
+    const tailLeftLng = lng - perpX * arrowSize * 0.6;
     
-    const tailRightLat = lat + perpY * arrowSize * 0.5;
-    const tailRightLng = lng + perpX * arrowSize * 0.5;
+    const tailRightLat = lat + perpY * arrowSize * 0.6;
+    const tailRightLng = lng + perpX * arrowSize * 0.6;
     
-    // Create arrow polygon
+    // Create arrow polygon with high visibility
     const arrowPolygon = L.polygon([
-      [headLat, headLng],      // Arrow tip
+      [headLat, headLng],           // Arrow tip
       [tailLeftLat, tailLeftLng],   // Left tail
-      [lat, lng],              // Center (back of arrow)
+      [lat, lng],                   // Center (back of arrow)
       [tailRightLat, tailRightLng], // Right tail
-      [headLat, headLng]       // Close polygon
+      [headLat, headLng]            // Close polygon
     ], {
-      color: '#ffffff',        // White outline
-      fillColor: isBidirectional ? '#4CAF50' : '#FF9800', // Green for bidirectional, Orange for unidirectional
-      weight: 1,
-      fillOpacity: 0.8,
-      opacity: 0.9
+      color: '#FFD700',             // Gold outline for high contrast
+      fillColor: '#FFFF00',         // Bright yellow fill - maximum visibility
+      weight: 1,                    // Visible outline
+      fillOpacity: 1.0,             // Full opacity - no transparency
+      opacity: 1.0,                 // Full outline opacity
+      interactive: false,           // Don't interfere with road clicks
+      bubblingMouseEvents: false,   // Let mouse events pass through to road
+      pane: 'overlayPane'          // Ensure it's on top
     });
     
     return arrowPolygon;
